@@ -1,0 +1,15 @@
+{
+  "description": "Claude Code 세션 시작 시 자동으로 현재 계정을 등록합니다",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
