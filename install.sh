@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Claude Code Multi-Account Manager Installer
-# 다중 계정 관리 설치 스크립트
+# Claude Code Multi-Account Manager - Plugin Installer
+# Claude Code 다중 계정 관리 플러그인 설치 스크립트
 #
 
 set -e
@@ -16,65 +16,92 @@ DIM='\033[2m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CLAUDE_DIR="$HOME/.claude"
-ACCOUNTS_DIR="$CLAUDE_DIR/accounts"
-ALIAS_CMD="alias account=\"python3 $SCRIPT_DIR/account_manager.py\""
+PLUGIN_VERSION="1.0.0"
+PLUGIN_NAME="account-manager"
+PLUGIN_DIR="$HOME/.claude/plugins/cache/local/$PLUGIN_NAME/$PLUGIN_VERSION"
+ACCOUNTS_DIR="$HOME/.claude/accounts"
+INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
 
 echo ""
 echo -e "${BOLD}  Claude Code Multi-Account Manager${NC}"
 echo -e "${DIM}  ─────────────────────────────────────${NC}"
 echo ""
 
-# 디렉토리 생성
-echo -e "  ${CYAN}[1/3]${NC} 디렉토리 생성..."
+# 1. 계정 디렉토리 생성
+echo -e "  ${CYAN}[1/4]${NC} 계정 디렉토리 생성..."
 mkdir -p "$ACCOUNTS_DIR"
-
-# accounts 디렉토리 권한 설정
-echo -e "  ${CYAN}[2/3]${NC} 보안 설정..."
 chmod 700 "$ACCOUNTS_DIR"
 
-# index.json 초기화 (없는 경우에만)
 if [ ! -f "$ACCOUNTS_DIR/index.json" ]; then
     echo '{"version": 1, "accounts": [], "activeAccountId": null}' > "$ACCOUNTS_DIR/index.json"
 fi
 
-# alias 추가
-echo -e "  ${CYAN}[3/3]${NC} alias 등록..."
+# 2. 플러그인 디렉토리 생성 및 복사
+echo -e "  ${CYAN}[2/4]${NC} 플러그인 파일 복사..."
+mkdir -p "$PLUGIN_DIR"
 
-# 사용 중인 쉘 확인
-SHELL_RC=""
-if [ -n "$ZSH_VERSION" ] || [ "$SHELL" = "/bin/zsh" ]; then
-    SHELL_RC="$HOME/.zshrc"
-elif [ -n "$BASH_VERSION" ] || [ "$SHELL" = "/bin/bash" ]; then
-    SHELL_RC="$HOME/.bashrc"
+# 필요한 파일들 복사
+cp -r "$SCRIPT_DIR/.claude-plugin" "$PLUGIN_DIR/"
+cp -r "$SCRIPT_DIR/commands" "$PLUGIN_DIR/"
+cp -r "$SCRIPT_DIR/hooks" "$PLUGIN_DIR/"
+cp -r "$SCRIPT_DIR/hooks-handlers" "$PLUGIN_DIR/"
+cp "$SCRIPT_DIR/account_manager.py" "$PLUGIN_DIR/"
+
+# 실행 권한 설정
+chmod +x "$PLUGIN_DIR/hooks-handlers/session-start.sh"
+
+# 3. installed_plugins.json에 등록
+echo -e "  ${CYAN}[3/4]${NC} 플러그인 등록..."
+
+# installed_plugins.json이 없으면 생성
+if [ ! -f "$INSTALLED_PLUGINS" ]; then
+    mkdir -p "$(dirname "$INSTALLED_PLUGINS")"
+    echo '{"version": 2, "plugins": {}}' > "$INSTALLED_PLUGINS"
 fi
 
-if [ -n "$SHELL_RC" ]; then
-    # 기존 alias 제거 후 새로 추가
-    grep -v "alias account=" "$SHELL_RC" > "$SHELL_RC.tmp" 2>/dev/null || true
-    mv "$SHELL_RC.tmp" "$SHELL_RC"
-    echo "$ALIAS_CMD" >> "$SHELL_RC"
-    echo -e "  ${DIM}  → $SHELL_RC 에 추가됨${NC}"
-fi
+# Python으로 JSON 업데이트
+python3 << EOF
+import json
+import os
+from datetime import datetime, timezone
+
+path = "$INSTALLED_PLUGINS"
+plugin_path = "$PLUGIN_DIR"
+
+with open(path, 'r') as f:
+    data = json.load(f)
+
+if 'plugins' not in data:
+    data['plugins'] = {}
+
+data['plugins']['$PLUGIN_NAME@local'] = [{
+    'scope': 'user',
+    'installPath': plugin_path,
+    'version': '$PLUGIN_VERSION',
+    'installedAt': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+    'lastUpdated': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+}]
+
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+EOF
+
+# 4. 완료
+echo -e "  ${CYAN}[4/4]${NC} 설치 확인..."
 
 echo ""
 echo -e "${DIM}  ─────────────────────────────────────${NC}"
-echo -e "  ${GREEN}설치 완료!${NC}"
+echo -e "  ${GREEN}✓ 설치 완료!${NC}"
 echo ""
-echo -e "  ${BOLD}즉시 사용하기:${NC}"
-echo -e "  ${DIM}다음 중 하나를 실행하세요:${NC}"
-echo ""
-echo -e "    ${CYAN}source $SHELL_RC${NC}"
-echo ""
-echo -e "  ${DIM}또는 아래 명령 복사 후 붙여넣기:${NC}"
-echo ""
-echo -e "    ${CYAN}$ALIAS_CMD${NC}"
+echo -e "  ${BOLD}다음 단계:${NC}"
+echo -e "  ${YELLOW}Claude Code를 재시작하세요${NC}"
 echo ""
 echo -e "${DIM}  ─────────────────────────────────────${NC}"
-echo -e "  ${BOLD}사용법:${NC}"
-echo -e "  ${CYAN}account${NC}              계정 목록 + 사용량"
-echo -e "  ${CYAN}account add 이름${NC}    현재 계정 저장"
-echo -e "  ${CYAN}account switch${NC}      계정 전환 (대화형)"
-echo -e "  ${CYAN}account check${NC}       토큰 상태 확인"
-echo -e "  ${CYAN}account help${NC}        전체 도움말"
+echo -e "  ${BOLD}사용법 (Claude Code 대화창에서):${NC}"
+echo -e "  ${CYAN}/account${NC}              계정 목록 + 사용량"
+echo -e "  ${CYAN}/account-add 이름${NC}    현재 계정 저장"
+echo -e "  ${CYAN}/account-switch${NC}      계정 전환"
+echo -e "  ${CYAN}/account-check${NC}       토큰 상태 확인"
+echo ""
+echo -e "  ${DIM}세션 시작 시 자동으로 현재 계정이 등록됩니다.${NC}"
 echo ""
