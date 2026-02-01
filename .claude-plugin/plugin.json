@@ -1,5 +1,5 @@
 {
-  "name": "account-manager",
+  "name": "account",
   "description": "Claude Code 다중 계정 관리 - 여러 계정 간 전환, 사용량 모니터링, 토큰 자동 갱신",
   "version": "1.0.0",
   "author": {

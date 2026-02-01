@@ -17,7 +17,7 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_VERSION="1.0.0"
-PLUGIN_NAME="account-manager"
+PLUGIN_NAME="account"
 PLUGIN_DIR="$HOME/.claude/plugins/cache/local/$PLUGIN_NAME/$PLUGIN_VERSION"
 ACCOUNTS_DIR="$HOME/.claude/accounts"
 INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
@@ -86,22 +86,65 @@ with open(path, 'w') as f:
     json.dump(data, f, indent=2)
 EOF
 
-# 4. 완료
-echo -e "  ${CYAN}[4/4]${NC} 설치 확인..."
+# 4. 터미널 alias 설정
+echo -e "  ${CYAN}[4/5]${NC} 터미널 alias 설정..."
+
+ALIAS_LINE="alias account-switch='python3 \"$PLUGIN_DIR/account_manager.py\" switch'"
+ALIAS_LIST="alias account-list='python3 \"$PLUGIN_DIR/account_manager.py\" list'"
+
+# 사용자 shell 확인
+SHELL_RC=""
+if [ -n "$ZSH_VERSION" ] || [ "$SHELL" = "/bin/zsh" ]; then
+    SHELL_RC="$HOME/.zshrc"
+elif [ -n "$BASH_VERSION" ] || [ "$SHELL" = "/bin/bash" ]; then
+    SHELL_RC="$HOME/.bashrc"
+fi
+
+ALIAS_ADDED=false
+if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
+    # 이미 있는지 확인
+    if ! grep -q "account-switch" "$SHELL_RC" 2>/dev/null; then
+        echo "" >> "$SHELL_RC"
+        echo "# Claude Account Manager - 토큰 소진 시 터미널에서 계정 전환" >> "$SHELL_RC"
+        echo "$ALIAS_LINE" >> "$SHELL_RC"
+        echo "$ALIAS_LIST" >> "$SHELL_RC"
+        ALIAS_ADDED=true
+        echo -e "    ${GREEN}✓${NC} $SHELL_RC에 alias 추가됨"
+    else
+        echo -e "    ${DIM}이미 설정되어 있음${NC}"
+    fi
+else
+    echo -e "    ${YELLOW}!${NC} shell 설정 파일을 찾을 수 없습니다"
+    echo -e "    ${DIM}수동으로 추가하세요: $ALIAS_LINE${NC}"
+fi
+
+# 5. 완료
+echo -e "  ${CYAN}[5/5]${NC} 설치 확인..."
 
 echo ""
 echo -e "${DIM}  ─────────────────────────────────────${NC}"
 echo -e "  ${GREEN}✓ 설치 완료!${NC}"
+
+if [ "$ALIAS_ADDED" = true ]; then
+    echo ""
+    echo -e "  ${YELLOW}⚠ 터미널을 재시작하거나 'source $SHELL_RC' 실행${NC}"
+fi
+
 echo ""
 echo -e "  ${BOLD}다음 단계:${NC}"
 echo -e "  ${YELLOW}Claude Code를 재시작하세요${NC}"
 echo ""
 echo -e "${DIM}  ─────────────────────────────────────${NC}"
 echo -e "  ${BOLD}사용법 (Claude Code 대화창에서):${NC}"
-echo -e "  ${CYAN}/account${NC}              계정 목록 + 사용량"
-echo -e "  ${CYAN}/account-add 이름${NC}    현재 계정 저장"
-echo -e "  ${CYAN}/account-switch${NC}      계정 전환"
-echo -e "  ${CYAN}/account-check${NC}       토큰 상태 확인"
+echo -e "  ${CYAN}/account:list${NC}         계정 목록 + 사용량"
+echo -e "  ${CYAN}/account:add 이름${NC}     현재 계정 저장"
+echo -e "  ${CYAN}/account:switch${NC}       계정 전환"
+echo -e "  ${CYAN}/account:check${NC}        토큰 상태 확인"
+echo ""
+echo -e "${DIM}  ─────────────────────────────────────${NC}"
+echo -e "  ${BOLD}🚨 토큰 소진 시 (Claude가 응답 안 할 때):${NC}"
+echo -e "  ${CYAN}account-switch${NC}       터미널에서 계정 전환"
+echo -e "  ${CYAN}account-list${NC}         터미널에서 계정 목록"
 echo ""
 echo -e "  ${DIM}세션 시작 시 자동으로 현재 계정이 등록됩니다.${NC}"
 echo ""
