@@ -20,21 +20,16 @@ Claude 세션 내에서 위 명령어 실행을 요청하거나, 터미널에서
 
 ```mermaid
 flowchart LR
-    subgraph 세션시작
-        A[Claude Code 시작] --> B[SessionStart Hook]
-        B --> C[모든 계정 토큰 갱신]
+    subgraph 토큰갱신
+        A[세션 시작] --> B[모든 토큰 갱신]
+        C[메시지 입력] --> D{만료 1시간 이내?}
+        D -->|Yes| E[해당 토큰 갱신]
+        D -->|No| F[스킵]
     end
 
     subgraph 계정관리
-        D["account:add"] --> E[현재 계정 저장]
-        F["account:switch"] --> G[토큰 교체]
-        G --> H[재시작]
-    end
-
-    subgraph 저장소
-        E --> I[(Keychain)]
-        E --> J[(accounts/)]
-        G --> I
+        G["account:add"] --> H[Keychain 저장]
+        I["account:switch"] --> J[토큰 교체 + 재시작]
     end
 ```
 
@@ -68,7 +63,9 @@ flowchart LR
 
 ## 주요 기능
 
-- **자동 토큰 갱신** - 세션 시작 시 모든 계정 토큰 갱신
+- **자동 토큰 갱신**
+  - 세션 시작 시: 모든 계정 토큰 갱신
+  - 메시지 입력 시: 만료 임박(1시간 이내) 토큰 갱신
 - **사용량 모니터링** - 현재 세션 / 주간 사용량 시각화
 - **Plan 자동 감지** - Free / Pro / Team / Max5 / Max20
 
