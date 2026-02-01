@@ -72,17 +72,6 @@ flowchart LR
 - **사용량 모니터링** - 현재 세션 / 주간 사용량 시각화
 - **Plan 자동 감지** - Free / Pro / Team / Max5 / Max20
 
-## 업데이트
-
-```bash
-claude plugin marketplace update lee-ji-hoon
-claude plugin update account@lee-ji-hoon
-```
-
-## 문서
-
-- [아키텍처 및 구현 상세](./docs/ARCHITECTURE.md)
-
 ## 요구사항
 
 - macOS (Keychain 사용)
