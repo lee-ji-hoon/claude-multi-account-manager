@@ -177,20 +177,24 @@ flowchart TD
 **갱신 API 호출:**
 
 ```
-POST https://console.anthropic.com/v1/oauth/token
+POST https://platform.claude.com/v1/oauth/token
 Content-Type: application/x-www-form-urlencoded
 
 grant_type=refresh_token
 &refresh_token={refresh_token}
-&client_id=9d1c250a-e61b-44b0-b9e5-a7bbfd29a6d0
+&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e
 
 Response:
 {
-  "access_token": "eyJ...(새 토큰)",
-  "refresh_token": "refresh_...(새 갱신 토큰)",
-  "expires_in": 3600
+  "token_type": "Bearer",
+  "access_token": "sk-ant-oat01-...(새 토큰)",
+  "refresh_token": "sk-ant-ort01-...(새 갱신 토큰)",
+  "expires_in": 28800,
+  "scope": "user:inference user:mcp_servers user:profile user:sessions:claude_code"
 }
 ```
+
+**중요:** refresh_token은 일회용입니다. 갱신 시 새 refresh_token이 발급되고 기존 토큰은 무효화됩니다.
 
 ### 4. 사용량 조회
 

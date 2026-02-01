@@ -520,16 +520,19 @@ def refresh_access_token(credential=None, credential_file=None):
 
     try:
         # OAuth 토큰 갱신 요청
-        data = json.dumps({
+        # Claude Code 공식 OAuth 엔드포인트 및 client_id 사용
+        import urllib.parse
+        data = urllib.parse.urlencode({
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
+            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
         }).encode('utf-8')
 
         req = urllib.request.Request(
-            "https://api.anthropic.com/oauth/token",
+            "https://platform.claude.com/v1/oauth/token",
             data=data,
             headers={
-                "Content-Type": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
                 "User-Agent": "claude-account-manager/1.0",
             },
             method="POST",
