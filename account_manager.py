@@ -493,6 +493,17 @@ def is_token_expired(credential):
     return datetime.now() > expires_datetime - timedelta(minutes=5)
 
 
+def is_token_expiring_soon(credential, hours=1):
+    """토큰이 곧 만료되는지 확인 (기본 1시간 이내)"""
+    oauth = credential.get("claudeAiOauth", {})
+    expires_at = oauth.get("expiresAt")
+    if not expires_at:
+        return False
+
+    expires_datetime = datetime.fromtimestamp(expires_at / 1000)
+    return datetime.now() > expires_datetime - timedelta(hours=hours)
+
+
 def refresh_access_token(credential=None, credential_file=None):
     """
     Refresh token으로 access token 갱신
@@ -1672,6 +1683,65 @@ def cmd_refresh_all():
     return refreshed_count
 
 
+def cmd_refresh_expiring(hours=1):
+    """만료 임박 토큰만 갱신 (UserPromptSubmit Hook용)
+
+    세션 중간에 토큰 만료를 방지하기 위해,
+    만료 N시간 이내인 토큰만 선택적으로 갱신합니다.
+
+    Args:
+        hours: 만료 임박 기준 시간 (기본 1시간)
+
+    Returns:
+        int: 갱신 성공한 계정 수
+    """
+    index = load_index()
+    if not index["accounts"]:
+        return 0
+
+    refreshed_count = 0
+    current = get_current_account()
+    current_email = current.get("emailAddress", "") if current else ""
+
+    for acc in index["accounts"]:
+        # 현재 계정은 스킵 (이미 활성 상태)
+        if acc["email"] == current_email:
+            continue
+
+        credential_file = acc.get("credentialFile")
+        if not credential_file:
+            continue
+
+        credential_path = ACCOUNTS_DIR / credential_file
+        if not credential_path.exists():
+            continue
+
+        try:
+            credential = json.loads(credential_path.read_text())
+        except (json.JSONDecodeError, IOError):
+            continue
+
+        # 만료 임박 토큰만 갱신
+        if not is_token_expiring_soon(credential, hours=hours):
+            continue
+
+        new_credential, error = refresh_access_token(credential)
+        if new_credential:
+            credential_path.write_text(json.dumps(new_credential, indent=2, ensure_ascii=False))
+            os.chmod(credential_path, 0o600)
+
+            detected_plan = detect_plan_from_credential(new_credential)
+            acc["plan"] = detected_plan
+
+            refreshed_count += 1
+            print(f"[refresh] {acc['id']}: 만료 임박 토큰 갱신됨 [{detected_plan}]")
+
+    if refreshed_count > 0:
+        save_index(index)
+
+    return refreshed_count
+
+
 def cmd_setup_hook():
     """Claude Code Hook 설정
 
@@ -1913,6 +1983,12 @@ def main():
     elif args[0] == "refresh-all":
         count = cmd_refresh_all()
         print(f"갱신된 계정: {count}개")
+        sys.exit(0)
+    elif args[0] == "refresh-expiring":
+        hours = int(args[1]) if len(args) > 1 else 1
+        count = cmd_refresh_expiring(hours)
+        if count > 0:
+            print(f"만료 임박 토큰 갱신: {count}개")
         sys.exit(0)
     elif args[0] == "setup-hook":
         cmd_setup_hook()

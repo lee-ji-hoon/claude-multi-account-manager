@@ -4,6 +4,15 @@ Claude Code 다중 계정 관리 플러그인. 여러 계정을 로그아웃 없
 
 ## 설치
 
+### Claude 세션 내에서 설치 (권장)
+
+Claude Code 세션에서 아래 내용을 입력하세요:
+
+> 마켓플레이스 등록하고 account 플러그인 설치해줘
+> https://github.com/lee-ji-hoon/claude-multi-account-manager.git
+
+### 터미널에서 설치
+
 ```bash
 # 마켓플레이스 등록 (최초 1회)
 claude plugin marketplace add https://github.com/lee-ji-hoon/claude-multi-account-manager.git
@@ -24,8 +33,8 @@ flowchart LR
     end
 
     subgraph 계정관리
-        D[/account:add] --> E[현재 계정 저장]
-        F[/account:switch] --> G[토큰 교체]
+        D["account:add"] --> E[현재 계정 저장]
+        F["account:switch"] --> G[토큰 교체]
         G --> H[재시작]
     end
 

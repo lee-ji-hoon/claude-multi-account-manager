@@ -1,5 +1,5 @@
 {
-  "description": "Claude Code 세션 시작 시 자동으로 현재 계정을 등록합니다",
+  "description": "Claude Code 계정 관리 Hook - 세션 시작 시 계정 등록, 메시지 입력 시 만료 임박 토큰 갱신",
   "hooks": {
     "SessionStart": [
       {
@@ -9,6 +9,17 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start.sh",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks-handlers/prompt-submit.sh",
+            "timeout": 5
           }
         ]
       }
