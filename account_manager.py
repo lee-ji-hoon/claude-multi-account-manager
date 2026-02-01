@@ -1021,42 +1021,97 @@ def cmd_add(name=None):
     for acc in index["accounts"]:
         if acc["email"] == email:
             print(f"이미 등록된 계정입니다: {acc['id']} ({acc['name']})")
-            print(f"삭제 후 다시 추가하려면: /account remove {acc['id']}")
+            print()
+            print(c(Colors.DIM, "  " + "─" * 40))
+            print(f"  [1] 토큰만 갱신 (재로그인 없이)")
+            print(f"  [2] 새로 로그인 후 갱신")
+            print(f"  [3] 취소")
+            print(c(Colors.DIM, "  " + "─" * 40))
+            print(f"  {c(Colors.DIM, '번호를 입력하세요 (기본: 1)')}: ", end="", flush=True)
+
+            try:
+                choice = input().strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                print("취소됨")
+                return False
+
+            if choice == "1" or choice == "":
+                # 기존 계정 토큰만 갱신
+                credential = get_keychain_credential()
+                if credential:
+                    credential_path = ACCOUNTS_DIR / acc.get("credentialFile", f"credential_{acc['id']}.json")
+                    credential_path.write_text(json.dumps(credential, indent=2, ensure_ascii=False))
+                    os.chmod(credential_path, 0o600)
+
+                    # Plan도 자동 감지해서 갱신
+                    detected_plan = detect_plan_from_credential(credential)
+                    for i, a in enumerate(index["accounts"]):
+                        if a["id"] == acc["id"]:
+                            index["accounts"][i]["plan"] = detected_plan
+                            break
+                    save_index(index)
+
+                    print()
+                    print(c(Colors.GREEN, f"  토큰 갱신 완료: {acc['id']}"))
+                    print(f"  Plan: {detected_plan} (자동 감지)")
+                else:
+                    print(c(Colors.RED, "  토큰을 가져올 수 없습니다."))
+                return False
+            elif choice == "2":
+                # 새로 로그인 요청
+                print()
+                print(c(Colors.YELLOW, "  새로 로그인해주세요: /login"))
+                print(c(Colors.DIM, "  로그인 후 다시 /account-add 를 실행하세요."))
+                return "need_login"
+            else:
+                print("취소됨")
+                return False
+
+    # credential에서 Plan 자동 감지
+    credential = get_keychain_credential()
+    detected_plan = None
+    if credential:
+        detected_plan = detect_plan_from_credential(credential)
+
+    # Plan 확인 (자동 감지 결과 표시)
+    print()
+    if detected_plan and detected_plan != "Free":
+        print(c(Colors.GREEN, f"  Plan 자동 감지: {detected_plan}"))
+        plan = detected_plan
+    else:
+        # 자동 감지 실패 시 수동 선택
+        print(c(Colors.BOLD, "  Plan 선택"))
+        print(c(Colors.DIM, "  " + "─" * 40))
+        plans = ["Free", "Pro", "Team", "Max5", "Max20"]
+        for i, p in enumerate(plans, 1):
+            desc = ""
+            if p == "Max5":
+                desc = c(Colors.DIM, " (5 프로젝트)")
+            elif p == "Max20":
+                desc = c(Colors.DIM, " (20 프로젝트)")
+            print(f"  [{i}] {p}{desc}")
+        print(c(Colors.DIM, "  " + "─" * 40))
+        print(f"  {c(Colors.DIM, '번호를 입력하세요 (기본: 1)')}: ", end="", flush=True)
+
+        try:
+            choice = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            print("취소됨")
             return False
 
-    # Plan 선택
-    print()
-    print(c(Colors.BOLD, "  Plan 선택"))
-    print(c(Colors.DIM, "  " + "─" * 40))
-    plans = ["Free", "Pro", "Team", "Max5", "Max20"]
-    for i, p in enumerate(plans, 1):
-        desc = ""
-        if p == "Max5":
-            desc = c(Colors.DIM, " (5 프로젝트)")
-        elif p == "Max20":
-            desc = c(Colors.DIM, " (20 프로젝트)")
-        print(f"  [{i}] {p}{desc}")
-    print(c(Colors.DIM, "  " + "─" * 40))
-    print(f"  {c(Colors.DIM, '번호를 입력하세요 (기본: 1)')}: ", end="", flush=True)
-
-    try:
-        choice = input().strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        print("취소됨")
-        return False
-
-    if choice == "":
-        plan = "Free"
-    else:
-        try:
-            idx = int(choice) - 1
-            if 0 <= idx < len(plans):
-                plan = plans[idx]
-            else:
-                plan = "Free"
-        except ValueError:
+        if choice == "":
             plan = "Free"
+        else:
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(plans):
+                    plan = plans[idx]
+                else:
+                    plan = "Free"
+            except ValueError:
+                plan = "Free"
 
     # Save profile
     profile_file = f"profile_{account_id}.json"
@@ -1289,9 +1344,53 @@ def cmd_switch(account_id=None):
     return True
 
 
-def cmd_remove(account_id):
-    """계정 삭제"""
+def cmd_remove(account_id=None):
+    """계정 삭제 (대화형 선택 지원)"""
     index = load_index()
+
+    if not index["accounts"]:
+        print("등록된 계정이 없습니다.")
+        return False
+
+    # 인자가 없으면 대화형 선택
+    if account_id is None:
+        print()
+        print(c(Colors.BOLD, "  삭제할 계정 선택"))
+        print(c(Colors.DIM, "  " + "─" * 55))
+
+        current = get_current_account()
+        current_email = current.get("emailAddress", "") if current else ""
+
+        for i, acc in enumerate(index["accounts"], 1):
+            is_current = acc["email"] == current_email
+            marker = c(Colors.GREEN, "●") if is_current else " "
+            plan_badge = c(Colors.DIM, f"[{acc.get('plan', '?')}]")
+            print(f"  [{i}] {marker} {acc['name']} {plan_badge}")
+            print(f"      {c(Colors.DIM, acc['email'])}")
+
+        print(c(Colors.DIM, "  " + "─" * 55))
+        print(f"  {c(Colors.DIM, '번호를 입력하세요 (취소: q)')}: ", end="", flush=True)
+
+        try:
+            choice = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            print("취소됨")
+            return False
+
+        if choice.lower() in ('q', 'quit', 'exit', ''):
+            print("취소됨")
+            return False
+
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(index["accounts"]):
+                account_id = index["accounts"][idx]["id"]
+            else:
+                print(f"잘못된 번호입니다: {choice}")
+                return False
+        except ValueError:
+            account_id = choice
 
     # Find account
     account = None
@@ -1304,6 +1403,24 @@ def cmd_remove(account_id):
 
     if not account:
         print(f"계정을 찾을 수 없습니다: {account_id}")
+        return False
+
+    # 삭제 확인
+    print()
+    print(c(Colors.YELLOW, f"  정말 삭제하시겠습니까?"))
+    print(f"  계정: {account['name']} ({account['email']})")
+    print(c(Colors.DIM, "  " + "─" * 40))
+    print(f"  {c(Colors.DIM, 'y/n (기본: n)')}: ", end="", flush=True)
+
+    try:
+        confirm = input().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        print("취소됨")
+        return False
+
+    if confirm not in ('y', 'yes'):
+        print("취소됨")
         return False
 
     # Remove profile file
@@ -1478,6 +1595,80 @@ def cmd_auto_add():
     # 9. 성공 메시지
     print(f"[auto-add] 계정 등록됨: {name} ({email}) [{plan}]")
     return True
+
+
+def cmd_refresh_all():
+    """모든 등록된 계정의 토큰 갱신 (Hook용, 비대화형)
+
+    - 각 계정의 refreshToken으로 accessToken 갱신
+    - 현재 로그인된 계정도 갱신
+    - 실패해도 다음 계정 계속 진행
+
+    Returns:
+        int: 갱신 성공한 계정 수
+    """
+    index = load_index()
+    if not index["accounts"]:
+        return 0
+
+    refreshed_count = 0
+    current = get_current_account()
+    current_email = current.get("emailAddress", "") if current else ""
+
+    for acc in index["accounts"]:
+        credential_file = acc.get("credentialFile")
+        if not credential_file:
+            continue
+
+        credential_path = ACCOUNTS_DIR / credential_file
+
+        # 현재 로그인된 계정이면 Keychain에서 최신 토큰 가져오기
+        if acc["email"] == current_email:
+            current_credential = get_keychain_credential()
+            if current_credential:
+                credential_path.write_text(json.dumps(current_credential, indent=2, ensure_ascii=False))
+                os.chmod(credential_path, 0o600)
+
+                # Plan도 갱신
+                detected_plan = detect_plan_from_credential(current_credential)
+                acc["plan"] = detected_plan
+
+                refreshed_count += 1
+                print(f"[refresh] {acc['id']}: 현재 계정 토큰 저장됨 [{detected_plan}]")
+            continue
+
+        # 다른 계정은 refreshToken으로 갱신
+        if not credential_path.exists():
+            continue
+
+        try:
+            credential = json.loads(credential_path.read_text())
+        except (json.JSONDecodeError, IOError):
+            continue
+
+        # 만료 여부 확인 (만료되지 않았으면 스킵)
+        if not is_token_expired(credential):
+            continue
+
+        # refreshToken으로 갱신 시도
+        new_credential, error = refresh_access_token(credential)
+        if new_credential:
+            credential_path.write_text(json.dumps(new_credential, indent=2, ensure_ascii=False))
+            os.chmod(credential_path, 0o600)
+
+            # Plan도 갱신
+            detected_plan = detect_plan_from_credential(new_credential)
+            acc["plan"] = detected_plan
+
+            refreshed_count += 1
+            print(f"[refresh] {acc['id']}: 토큰 갱신됨 [{detected_plan}]")
+        else:
+            print(f"[refresh] {acc['id']}: 갱신 실패 - {error}", file=sys.stderr)
+
+    # index 저장 (Plan 정보 갱신)
+    save_index(index)
+
+    return refreshed_count
 
 
 def cmd_setup_hook():
@@ -1663,7 +1854,8 @@ def cmd_help():
     remove [id]         저장된 계정 삭제
     rename [id] [name]  계정 이름 변경
     set-plan [id] [plan] Plan 수동 설정 (Free/Pro/Team/Max5/Max20)
-    auto-add            자동 계정 등록 (Hook용, 비대화형)
+    auto-add            자동 계정 등록 + 토큰 갱신 (Hook용)
+    refresh-all         모든 계정 토큰 갱신
     setup-hook          Claude Code Hook 설정
     check               현재 OAuth 토큰 상태 확인
     update              새 버전 확인
@@ -1698,10 +1890,8 @@ def main():
         account_id = args[1] if len(args) > 1 else None
         cmd_switch(account_id)
     elif args[0] in ("remove", "rm", "delete"):
-        if len(args) < 2:
-            print("사용법: /account remove [계정ID]")
-            return
-        cmd_remove(args[1])
+        account_id = args[1] if len(args) > 1 else None
+        cmd_remove(account_id)
     elif args[0] == "rename":
         if len(args) < 3:
             print("사용법: /account rename [계정ID] [새이름]")
@@ -1716,8 +1906,13 @@ def main():
             return
         cmd_set_plan(args[1], args[2])
     elif args[0] == "auto-add":
-        result = cmd_auto_add()
-        sys.exit(0)  # Hook은 항상 0으로 종료 (중복/성공 모두)
+        cmd_auto_add()
+        cmd_refresh_all()  # 모든 계정 토큰 갱신
+        sys.exit(0)  # Hook은 항상 0으로 종료
+    elif args[0] == "refresh-all":
+        count = cmd_refresh_all()
+        print(f"갱신된 계정: {count}개")
+        sys.exit(0)
     elif args[0] == "setup-hook":
         cmd_setup_hook()
     elif args[0] == "check":
