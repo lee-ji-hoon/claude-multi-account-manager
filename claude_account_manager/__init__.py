@@ -1,28 +1,45 @@
 """
-Claude Code Multi-Account Manager
+Claude Account Manager - Multi-account management for Claude Code
 
-다중 계정을 관리하는 CLI 도구입니다.
-macOS Keychain을 사용하여 OAuth 토큰을 안전하게 저장합니다.
+This package provides tools to manage multiple Claude accounts,
+including OAuth token management and account switching.
 """
 
-__author__ = "ezhoon"
+from .config import __version__, PACKAGE_NAME
+from .commands import main
 
-# account_manager.py의 main 함수를 패키지 수준에서 노출
-import sys
-import os
+# Re-export commonly used functions for backward compatibility
+from .keychain import get_keychain_credential, set_keychain_credential
+from .storage import load_index, save_index, load_claude_json, save_claude_json, get_current_account
+from .token import TokenStatus, refresh_access_token, check_token_status
+from .api import get_real_usage, _fetch_usage_from_api, get_today_usage, get_weekly_usage
+from .account import estimate_plan, detect_plan_from_credential
 
-# 패키지 경로를 sys.path에 추가 (개발 환경에서 필요)
-_package_dir = os.path.dirname(os.path.abspath(__file__))
-_project_dir = os.path.dirname(_package_dir)
-
-# account_manager.py에서 main 함수 가져오기
-# 두 가지 경로 지원: 패키지 내부 또는 프로젝트 루트
-try:
-    from .account_manager import main, __version__
-except ImportError:
-    # 프로젝트 루트의 account_manager.py 사용 (하위 호환)
-    if _project_dir not in sys.path:
-        sys.path.insert(0, _project_dir)
-    from account_manager import main, __version__
-
-__all__ = ["main", "__version__"]
+__all__ = [
+    # Version info
+    "__version__",
+    "PACKAGE_NAME",
+    # Main entry point
+    "main",
+    # Keychain
+    "get_keychain_credential",
+    "set_keychain_credential",
+    # Storage
+    "load_index",
+    "save_index",
+    "load_claude_json",
+    "save_claude_json",
+    "get_current_account",
+    # Token
+    "TokenStatus",
+    "refresh_access_token",
+    "check_token_status",
+    # API
+    "get_real_usage",
+    "_fetch_usage_from_api",
+    "get_today_usage",
+    "get_weekly_usage",
+    # Account
+    "estimate_plan",
+    "detect_plan_from_credential",
+]

@@ -1,0 +1,172 @@
+"""
+cmd_list: Display registered accounts with usage visualization
+"""
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
+from datetime import datetime
+
+from ..config import ACCOUNTS_DIR
+from ..ui import c, Colors, make_progress_bar
+from ..storage import load_index, get_current_account
+from ..keychain import get_keychain_credential
+from ..token import TokenStatus
+from ..api import _fetch_usage_from_api
+from ..account import estimate_plan
+
+
+def cmd_list():
+    """등록된 계정 목록 표시 (사용량 시각화 포함)"""
+    index = load_index()
+    current = get_current_account()
+    current_email = current.get("emailAddress", "")
+    current_plan = estimate_plan(current)
+
+    # 헤더
+    print()
+    print(c(Colors.BOLD, "  Claude 계정 목록"))
+    print(c(Colors.DIM, "  " + "─" * 55))
+
+    if not index["accounts"]:
+        print(c(Colors.DIM, "  (등록된 계정 없음)"))
+        print(c(Colors.DIM, "  /account add [이름] 으로 현재 계정을 저장하세요"))
+    else:
+        # 병렬로 모든 계정의 사용량 가져오기
+        def fetch_account_usage(acc):
+            """계정별 사용량 및 토큰 상태 가져오기 (401 시 자동 갱신 포함)"""
+            is_current = acc["email"] == current_email
+            if is_current:
+                # 현재 계정: Keychain 사용, credential_file=None
+                usage, token_status = _fetch_usage_from_api(include_token_status=True)
+                return (acc["id"], usage, token_status)
+            else:
+                # 저장된 계정: credential 파일 사용
+                cred_filename = acc.get("credentialFile")
+                if cred_filename:
+                    credential_path = ACCOUNTS_DIR / cred_filename
+                    if credential_path.exists():
+                        try:
+                            credential = json.loads(credential_path.read_text())
+                            # credential_file 전달하여 401 갱신 시 파일에 저장
+                            usage, token_status = _fetch_usage_from_api(
+                                credential,
+                                include_token_status=True,
+                                credential_file=credential_path
+                            )
+                            return (acc["id"], usage, token_status)
+                        except Exception:
+                            pass
+                return (acc["id"], None, TokenStatus.NO_TOKEN)
+
+        # 병렬 요청
+        usage_map = {}
+        token_status_map = {}
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(fetch_account_usage, acc): acc for acc in index["accounts"]}
+            for future in as_completed(futures):
+                try:
+                    acc_id, usage, token_status = future.result()
+                    usage_map[acc_id] = usage
+                    token_status_map[acc_id] = token_status
+                except Exception:
+                    pass
+
+        # 결과 출력
+        for i, acc in enumerate(index["accounts"], 1):
+            is_active = acc["id"] == index.get("activeAccountId")
+            is_current = acc["email"] == current_email
+
+            if is_active and is_current:
+                marker = c(Colors.GREEN, "●")
+                status = c(Colors.GREEN, "활성")
+            elif is_current:
+                marker = c(Colors.CYAN, "→")
+                status = c(Colors.CYAN, "현재")
+            elif is_active:
+                marker = c(Colors.DIM, "○")
+                status = c(Colors.DIM, "저장됨")
+            else:
+                marker = " "
+                status = ""
+
+            # Plan 정보 가져오기
+            if "plan" in acc:
+                plan = acc["plan"]
+            elif is_current:
+                plan = current_plan
+            else:
+                profile_path = ACCOUNTS_DIR / acc.get("profileFile", "")
+                if profile_path.exists():
+                    try:
+                        profile = json.loads(profile_path.read_text())
+                        plan = estimate_plan(profile)
+                    except Exception:
+                        plan = "?"
+                else:
+                    plan = "?"
+
+            # Plan 색상
+            plan_colors = {
+                "Free": Colors.DIM,
+                "Pro": Colors.CYAN,
+                "Team": Colors.MAGENTA,
+                "Max": Colors.YELLOW,
+                "Max5": Colors.YELLOW,
+                "Max20": Colors.GREEN,
+            }
+            plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
+
+            # 출력: [번호] ● name [Plan] - 상태
+            status_text = f" - {status}" if status else ""
+            print(f"  [{i}] {marker} {acc['name']} {plan_badge}{status_text}")
+            print(f"      {c(Colors.DIM, acc['email'])}")
+
+            # 사용량 표시 (미리 가져온 데이터 사용)
+            real_usage = usage_map.get(acc["id"])
+            token_status = token_status_map.get(acc["id"], TokenStatus.NO_TOKEN)
+
+            # 토큰 상태에 따른 경고 표시
+            if token_status == TokenStatus.EXPIRED:
+                print(f"      {c(Colors.RED, '⚠ 토큰 만료')} - {c(Colors.YELLOW, '재로그인 필요')}")
+            elif token_status == TokenStatus.INVALID:
+                print(f"      {c(Colors.RED, '⚠ 토큰 무효')} - {c(Colors.YELLOW, '재로그인 필요')}")
+            elif token_status == TokenStatus.NO_TOKEN:
+                print(f"      {c(Colors.DIM, '(credential 없음)')}")
+            elif token_status == TokenStatus.ERROR:
+                print(f"      {c(Colors.YELLOW, '⚠ 연결 오류')} - {c(Colors.DIM, '네트워크 확인 필요')}")
+            elif real_usage:
+                # 실제 API 데이터 사용
+                now = datetime.now(real_usage["sevenDayResetAt"].tzinfo) if real_usage["sevenDayResetAt"] else datetime.now()
+
+                # 현재 세션 사용량 (5시간)
+                if real_usage["fiveHour"] is not None:
+                    percentage = real_usage["fiveHour"]
+                    bar = make_progress_bar(percentage, width=12)
+                    reset_str = ""
+                    if real_usage["fiveHourResetAt"]:
+                        remaining = real_usage["fiveHourResetAt"] - now
+                        if remaining.total_seconds() > 0:
+                            hours = int(remaining.total_seconds() // 3600)
+                            minutes = int((remaining.total_seconds() % 3600) // 60)
+                            reset_str = f" | {c(Colors.CYAN, '⏱')} {hours}h {minutes}m"
+                    print(f"      {c(Colors.DIM, '현재')} {bar} {percentage}%{reset_str}")
+
+                # 주간 사용량
+                if real_usage["sevenDay"] is not None:
+                    percentage = real_usage["sevenDay"]
+                    bar = make_progress_bar(percentage, width=12)
+                    reset_str = ""
+                    if real_usage["sevenDayResetAt"]:
+                        remaining = real_usage["sevenDayResetAt"] - now
+                        if remaining.total_seconds() > 0:
+                            hours = int(remaining.total_seconds() // 3600)
+                            minutes = int((remaining.total_seconds() % 3600) // 60)
+                            reset_str = f" | {c(Colors.CYAN, '⏱')} {hours}h {minutes}m"
+                    print(f"      {c(Colors.DIM, '주간')} {bar} {percentage}%{reset_str}")
+
+    print(c(Colors.DIM, "  " + "─" * 55))
+
+    if not current_email:
+        print()
+        print(c(Colors.YELLOW, "  현재 로그인된 계정이 없습니다."))
+
+    print()
