@@ -206,6 +206,8 @@ def cmd_help():
   {c(Colors.CYAN, 'Actions')}:
     list                등록된 계정 목록 + 사용량 (기본값)
     add [name]          현재 로그인된 계정 저장
+    export              현재 계정 정보 추출 (다른 컴으로 옮기기)
+    import              다른 컴의 계정 가져오기
     switch [id]         계정 전환 (인자 없으면 대화형 선택)
     remove [id]         저장된 계정 삭제
     rename [id] [name]  계정 이름 변경

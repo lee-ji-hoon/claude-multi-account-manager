@@ -9,6 +9,8 @@ from .switch_cmd import cmd_switch
 from .remove_cmd import cmd_remove
 from .token_cmd import cmd_check, cmd_refresh_all, cmd_refresh_expiring
 from .misc_cmd import cmd_current, cmd_rename, cmd_set_plan, cmd_setup_hook, cmd_update, cmd_version, cmd_help
+from .import_cmd import cmd_import
+from .export_cmd import cmd_export_for_import
 
 
 def main():
@@ -25,6 +27,11 @@ def main():
     elif args[0] == "add":
         name = " ".join(args[1:]) if len(args) > 1 else None
         cmd_add(name)
+    elif args[0] == "import":
+        json_data = " ".join(args[1:]) if len(args) > 1 else None
+        cmd_import(json_data)
+    elif args[0] == "export":
+        cmd_export_for_import()
     elif args[0] == "switch":
         account_id = args[1] if len(args) > 1 else None
         cmd_switch(account_id)
@@ -80,6 +87,8 @@ __all__ = [
     "cmd_auto_add",
     "cmd_switch",
     "cmd_remove",
+    "cmd_import",
+    "cmd_export_for_import",
     "cmd_check",
     "cmd_refresh_all",
     "cmd_refresh_expiring",
