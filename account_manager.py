@@ -22,8 +22,20 @@ from pathlib import Path
 from datetime import datetime, date, timedelta
 
 
-# 버전 정보
-__version__ = "1.0.0"
+# 버전 정보 (plugin.json에서 읽기)
+def _get_version():
+    """plugin.json에서 버전 읽기"""
+    try:
+        plugin_json = Path(__file__).parent / ".claude-plugin" / "plugin.json"
+        if plugin_json.exists():
+            import json as _json
+            data = _json.loads(plugin_json.read_text())
+            return data.get("version", "0.0.0")
+    except:
+        pass
+    return "0.0.0"
+
+__version__ = _get_version()
 PACKAGE_NAME = "claude-account-manager"
 
 CLAUDE_JSON = Path.home() / ".claude.json"
