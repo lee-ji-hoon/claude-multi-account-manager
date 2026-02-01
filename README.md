@@ -6,10 +6,11 @@ Claude Code 다중 계정 관리 플러그인. 여러 계정을 로그아웃 없
 
 ### Claude 세션 내에서 설치 (권장)
 
-Claude Code 세션에서 아래 내용을 입력하세요:
+Claude Code 세션에서 아래처럼 말하세요:
 
-> 마켓플레이스 등록하고 account 플러그인 설치해줘
-> https://github.com/lee-ji-hoon/claude-multi-account-manager.git
+```
+이 플러그인 설치해줘: https://github.com/lee-ji-hoon/claude-multi-account-manager.git
+```
 
 ### 터미널에서 설치
 
