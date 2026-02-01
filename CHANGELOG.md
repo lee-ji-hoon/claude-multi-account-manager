@@ -2,31 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.0.1] - 2026-02-01
 
-## [1.2.0] - 2026-02-01
+### What's changed
 
-### Changed
-- README 간소화 및 Mermaid 다이어그램 추가
-- 상세 문서는 docs/ARCHITECTURE.md로 분리
+**Added**
+- Initial release of Claude Code multi-account manager plugin
+- Multiple account management without logout (`/account:add`, `/account:switch`, `/account:remove`)
+- Real-time usage monitoring with visual progress bars
+- Automatic token refresh for all accounts on session start
+- Plan auto-detection (Free / Pro / Team / Max5 / Max20)
+- SessionStart hook for automatic account registration
+- macOS Keychain integration for secure token storage
 
-## [1.1.0] - 2026-02-01
+**Technical Details**
+- OAuth token refresh via `platform.claude.com/v1/oauth/token`
+- Refresh token rotation (single-use tokens)
+- Token validity: 8 hours (28800 seconds)
 
-### Fixed
-- OAuth 토큰 갱신 엔드포인트 수정 (`platform.claude.com/v1/oauth/token`)
-- 올바른 client_id 사용
+### Commits
 
-### Added
-- 세션 시작 시 모든 계정 토큰 자동 갱신
-- release skill 추가
+```
+b360843 feat: Initial release - Claude Code multi-account manager plugin
+deef16d fix: Correct SessionStart hook configuration format
+6121cff docs: Update installation to plugin-based approach
+eb40c43 docs: Add marketplace installation method
+404c682 refactor: Simplify command structure and add marketplace support
+03c0a04 feat: Always refresh all account tokens on session start
+efad03b fix: Use correct OAuth endpoint for token refresh
+e8dd30c docs: Add architecture documentation with diagrams
+092bb67 docs: Add both dialog and terminal installation methods
+2c4c8a4 docs: Update README with new command structure
+b96b08b docs: Simplify README with Mermaid diagram
+```
 
-## [1.0.0] - 2026-01-31
+### Full Changelog
 
-### Added
-- 초기 릴리스
-- 다중 계정 관리 (add, switch, remove)
-- 사용량 모니터링 (시각화 바)
-- OAuth 토큰 자동 갱신
-- SessionStart Hook으로 자동 계정 등록
-- Max5/Max20 플랜 지원
+https://github.com/lee-ji-hoon/claude-multi-account-manager/commits/main
