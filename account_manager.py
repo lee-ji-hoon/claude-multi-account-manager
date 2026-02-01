@@ -1600,9 +1600,10 @@ def cmd_auto_add():
 def cmd_refresh_all():
     """모든 등록된 계정의 토큰 갱신 (Hook용, 비대화형)
 
-    - 각 계정의 refreshToken으로 accessToken 갱신
-    - 현재 로그인된 계정도 갱신
-    - 실패해도 다음 계정 계속 진행
+    세션 시작 시 모든 계정을 무조건 갱신하여:
+    - 장기간 미사용 계정의 토큰 만료 방지
+    - 세션 중간에 토큰 만료되는 상황 방지
+    - 모든 계정이 항상 최신 토큰 유지
 
     Returns:
         int: 갱신 성공한 계정 수
@@ -1622,8 +1623,9 @@ def cmd_refresh_all():
 
         credential_path = ACCOUNTS_DIR / credential_file
 
-        # 현재 로그인된 계정이면 Keychain에서 최신 토큰 가져오기
+        # 현재 로그인된 계정 처리
         if acc["email"] == current_email:
+            # Keychain에서 최신 토큰 가져와서 저장
             current_credential = get_keychain_credential()
             if current_credential:
                 credential_path.write_text(json.dumps(current_credential, indent=2, ensure_ascii=False))
@@ -1637,7 +1639,7 @@ def cmd_refresh_all():
                 print(f"[refresh] {acc['id']}: 현재 계정 토큰 저장됨 [{detected_plan}]")
             continue
 
-        # 다른 계정은 refreshToken으로 갱신
+        # 다른 계정은 refreshToken으로 무조건 갱신 (만료 여부 무관)
         if not credential_path.exists():
             continue
 
@@ -1646,11 +1648,7 @@ def cmd_refresh_all():
         except (json.JSONDecodeError, IOError):
             continue
 
-        # 만료 여부 확인 (만료되지 않았으면 스킵)
-        if not is_token_expired(credential):
-            continue
-
-        # refreshToken으로 갱신 시도
+        # refreshToken으로 갱신 시도 (만료 체크 없이 무조건 갱신)
         new_credential, error = refresh_access_token(credential)
         if new_credential:
             credential_path.write_text(json.dumps(new_credential, indent=2, ensure_ascii=False))
