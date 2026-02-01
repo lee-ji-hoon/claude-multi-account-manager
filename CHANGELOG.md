@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.0] - 2026-02-01
+
+### What's changed
+
+**Added**
+- UserPromptSubmit hook으로 만료 임박(1시간 이내) 토큰 자동 갱신
+- 세션 중간에 토큰 만료 방지 기능
+
+**Fixed**
+- README Mermaid 다이어그램 렌더링 오류 수정
+
+**Improved**
+- Claude 세션 내 설치 방법 안내 추가
+- CLAUDE.md에 OAuth 상세 정보 추가
+
+### Commits
+
+```
+03676cf fix: Mermaid syntax error and add session install guide
+```
+
+### Full Changelog
+
+https://github.com/lee-ji-hoon/claude-multi-account-manager/compare/v0.0.1...v0.1.0
+
+---
+
 ## [0.0.1] - 2026-02-01
 
 ### What's changed
