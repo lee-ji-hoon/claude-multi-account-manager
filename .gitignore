@@ -41,5 +41,6 @@ Thumbs.db
 .omc/
 *.log
 
-# Claude Code user config (not needed in repo)
-.claude/
+# Claude Code user config (except project instructions)
+.claude/*
+!.claude/CLAUDE.md
