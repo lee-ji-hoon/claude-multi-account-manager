@@ -14,7 +14,7 @@ $ARGUMENTS
 
 ## Instructions
 
-1. 먼저 계정 목록을 확인합니다:
+1. 먼저 계정 목록을 확인하고 **결과를 사용자에게 그대로 출력**하세요:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" list
 ```
@@ -28,10 +28,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" list
    - AskUserQuestion으로 "정말 삭제하시겠습니까?" 확인 질문을 하세요
    - 계정 이름과 이메일을 표시하세요
 
-4. 확인된 경우 삭제 실행:
+4. 확인된 경우 삭제 실행하고 **결과를 사용자에게 그대로 출력**하세요:
 ```bash
 echo "y" | python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" remove <선택된_계정ID>
 ```
+
+**중요**: 모든 명령 실행 후 출력 결과를 코드 블록 없이 그대로 사용자에게 보여주세요.
 
 ## Notes
 

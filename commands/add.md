@@ -14,7 +14,7 @@ $ARGUMENTS
 
 ## Instructions
 
-1. 먼저 계정 추가를 시도합니다:
+1. 먼저 계정 추가를 시도하고 **결과를 사용자에게 그대로 출력**하세요:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" add $ARGUMENTS
 ```
@@ -25,12 +25,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" add $ARGUMENTS
      - "새로 로그인 후 갱신" - /login 안내
      - "취소"
 
-3. 선택에 따라 실행:
+3. 선택에 따라 실행하고 **결과를 사용자에게 그대로 출력**하세요:
    - "토큰만 갱신" 선택 시:
      ```bash
      echo "1" | python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" add
      ```
    - "새로 로그인" 선택 시: 사용자에게 /login 후 다시 /account-add 실행 안내
+
+**중요**: 모든 명령 실행 후 출력 결과를 코드 블록 없이 그대로 사용자에게 보여주세요.
 
 ## Notes
 

@@ -9,11 +9,13 @@ allowed-tools: [Bash]
 
 ## Instructions
 
-다음 명령을 실행하세요:
+다음 명령을 실행하고 **결과를 사용자에게 그대로 출력**하세요:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" check
 ```
+
+**중요**: 명령 실행 후 출력 결과를 코드 블록 없이 그대로 사용자에게 보여주세요.
 
 ## Features
 

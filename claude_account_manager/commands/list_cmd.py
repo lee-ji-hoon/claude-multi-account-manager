@@ -14,6 +14,18 @@ from ..api import _fetch_usage_from_api
 from ..account import estimate_plan
 
 
+def _get_token_expires_at(credential):
+    """credential에서 토큰 만료 시간(datetime) 반환"""
+    if not credential:
+        return None
+    oauth = credential.get("claudeAiOauth", {})
+    expires_at = oauth.get("expiresAt")
+    if not expires_at:
+        return None
+    # expiresAt은 밀리초 타임스탬프
+    return datetime.fromtimestamp(expires_at / 1000)
+
+
 def cmd_list():
     """등록된 계정 목록 표시 (사용량 시각화 포함)"""
     index = load_index()
@@ -37,7 +49,10 @@ def cmd_list():
             if is_current:
                 # 현재 계정: Keychain 사용, credential_file=None
                 usage, token_status = _fetch_usage_from_api(include_token_status=True)
-                return (acc["id"], usage, token_status)
+                # 현재 계정의 credential에서 만료 시간 가져오기
+                current_cred = get_keychain_credential()
+                expires_at = _get_token_expires_at(current_cred)
+                return (acc["id"], usage, token_status, expires_at)
             else:
                 # 저장된 계정: credential 파일 사용
                 cred_filename = acc.get("credentialFile")
@@ -52,21 +67,29 @@ def cmd_list():
                                 include_token_status=True,
                                 credential_file=credential_path
                             )
-                            return (acc["id"], usage, token_status)
+                            # 갱신 후 다시 읽어서 최신 만료 시간 가져오기
+                            try:
+                                updated_cred = json.loads(credential_path.read_text())
+                                expires_at = _get_token_expires_at(updated_cred)
+                            except Exception:
+                                expires_at = _get_token_expires_at(credential)
+                            return (acc["id"], usage, token_status, expires_at)
                         except Exception:
                             pass
-                return (acc["id"], None, TokenStatus.NO_TOKEN)
+                return (acc["id"], None, TokenStatus.NO_TOKEN, None)
 
         # 병렬 요청
         usage_map = {}
         token_status_map = {}
+        expires_at_map = {}
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = {executor.submit(fetch_account_usage, acc): acc for acc in index["accounts"]}
             for future in as_completed(futures):
                 try:
-                    acc_id, usage, token_status = future.result()
+                    acc_id, usage, token_status, expires_at = future.result()
                     usage_map[acc_id] = usage
                     token_status_map[acc_id] = token_status
+                    expires_at_map[acc_id] = expires_at
                 except Exception:
                     pass
 
@@ -123,6 +146,7 @@ def cmd_list():
             # 사용량 표시 (미리 가져온 데이터 사용)
             real_usage = usage_map.get(acc["id"])
             token_status = token_status_map.get(acc["id"], TokenStatus.NO_TOKEN)
+            expires_at = expires_at_map.get(acc["id"])
 
             # 토큰 상태에 따른 경고 표시
             if token_status == TokenStatus.EXPIRED:
@@ -162,6 +186,22 @@ def cmd_list():
                             minutes = int((remaining.total_seconds() % 3600) // 60)
                             reset_str = f" | {c(Colors.CYAN, '⏱')} {hours}h {minutes}m"
                     print(f"      {c(Colors.DIM, '주간')} {bar} {percentage}%{reset_str}")
+
+                # 토큰 만료 시간 표시
+                if expires_at:
+                    now_local = datetime.now()
+                    remaining = expires_at - now_local
+                    if remaining.total_seconds() > 0:
+                        hours = int(remaining.total_seconds() // 3600)
+                        minutes = int((remaining.total_seconds() % 3600) // 60)
+                        # 1시간 이내면 경고 색상
+                        if hours < 1:
+                            expire_color = Colors.YELLOW
+                            expire_str = f"{minutes}m"
+                        else:
+                            expire_color = Colors.DIM
+                            expire_str = f"{hours}h {minutes}m"
+                        print(f"      {c(Colors.DIM, '토큰')} {c(expire_color, f'🔑 {expire_str} 후 만료')}")
 
     print(c(Colors.DIM, "  " + "─" * 55))
 
