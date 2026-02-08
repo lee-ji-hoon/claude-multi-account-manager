@@ -1,6 +1,7 @@
 """
 cmd_check, cmd_refresh_all, cmd_refresh_expiring: Token management commands
 """
+import fcntl
 import json
 import os
 import sys
@@ -9,9 +10,77 @@ from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
 from ..keychain import get_keychain_credential
-from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon
+from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon, is_token_fresh
 from ..api import _fetch_usage_from_api
 from ..account import detect_plan_from_credential
+
+
+def _safe_refresh_credential(credential_path, acc_id):
+    """파일 락을 사용하여 credential을 안전하게 갱신
+
+    동시에 여러 프로세스가 같은 refresh token을 사용하는 것을 방지합니다.
+    Non-blocking 락을 사용하여 다른 프로세스가 갱신 중이면 스킵합니다.
+
+    Args:
+        credential_path: credential 파일 경로 (Path 객체)
+        acc_id: 계정 ID (로깅용)
+
+    Returns:
+        tuple: (new_credential or None, error_message or None)
+    """
+    lock_path = credential_path.parent / f"{credential_path.name}.lock"
+    lock_fd = None
+
+    try:
+        # 1. 락 파일 열기 및 non-blocking 락 획득 시도
+        lock_fd = open(lock_path, "w")
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (IOError, OSError):
+            # 다른 프로세스가 갱신 중 → 스킵
+            return None, "skip:locked"
+
+        # 2. 락 획득 후 credential 파일 다시 읽기 (다른 프로세스가 이미 갱신했을 수 있음)
+        try:
+            credential = json.loads(credential_path.read_text())
+        except (json.JSONDecodeError, IOError):
+            return None, "credential 파일 읽기 실패"
+
+        # 3. 토큰 신선도 체크 (잔여 > 7시간이면 최근 갱신된 것)
+        if is_token_fresh(credential):
+            return credential, "skip:fresh"
+
+        # 4. refresh_access_token 호출
+        new_credential, error = refresh_access_token(credential)
+
+        if new_credential:
+            # 5. 성공 → 파일 저장
+            credential_path.write_text(json.dumps(new_credential, indent=2, ensure_ascii=False))
+            os.chmod(credential_path, 0o600)
+            return new_credential, None
+
+        # 6. 실패 → 파일 다시 읽기 (다른 프로세스가 갱신했을 수 있음)
+        try:
+            reread_credential = json.loads(credential_path.read_text())
+            if is_token_fresh(reread_credential):
+                return reread_credential, "skip:fresh_after_fail"
+        except (json.JSONDecodeError, IOError):
+            pass
+
+        return None, error
+
+    finally:
+        # 락 해제 및 정리
+        if lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                lock_fd.close()
+            except Exception:
+                pass
+            try:
+                lock_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def cmd_check():
@@ -124,28 +193,33 @@ def cmd_refresh_all():
                 print(f"[refresh] {acc['id']}: 현재 계정 토큰 저장됨 [{detected_plan}]")
             continue
 
-        # 다른 계정은 refreshToken으로 무조건 갱신 (만료 여부 무관)
+        # 다른 계정은 안전한 갱신 (파일 락 + 신선도 체크)
         if not credential_path.exists():
             continue
 
-        try:
-            credential = json.loads(credential_path.read_text())
-        except (json.JSONDecodeError, IOError):
+        new_credential, error = _safe_refresh_credential(credential_path, acc["id"])
+
+        if error and error.startswith("skip:"):
+            # 스킵된 경우 (락 획득 실패 또는 이미 신선한 토큰)
+            reason = error.split(":", 1)[1]
+            if reason == "locked":
+                print(f"[refresh] {acc['id']}: 다른 프로세스 갱신 중 → 스킵")
+            elif reason in ("fresh", "fresh_after_fail"):
+                # 이미 신선한 토큰 → Plan 업데이트만
+                if new_credential:
+                    detected_plan = detect_plan_from_credential(new_credential)
+                    acc["plan"] = detected_plan
+                print(f"[refresh] {acc['id']}: 최근 갱신됨 → 스킵 [{acc.get('plan', '?')}]")
             continue
 
-        # refreshToken으로 갱신 시도 (만료 체크 없이 무조건 갱신)
-        new_credential, error = refresh_access_token(credential)
-        if new_credential:
-            credential_path.write_text(json.dumps(new_credential, indent=2, ensure_ascii=False))
-            os.chmod(credential_path, 0o600)
-
+        if new_credential and not error:
             # Plan도 갱신
             detected_plan = detect_plan_from_credential(new_credential)
             acc["plan"] = detected_plan
 
             refreshed_count += 1
             print(f"[refresh] {acc['id']}: 토큰 갱신됨 [{detected_plan}]")
-        else:
+        elif error:
             print(f"[refresh] {acc['id']}: 갱신 실패 - {error}", file=sys.stderr)
 
     # index 저장 (Plan 정보 갱신)
@@ -187,20 +261,22 @@ def cmd_refresh_expiring(hours=1):
         if not credential_path.exists():
             continue
 
+        # 만료 임박 여부 먼저 확인 (락 획득 전 빠른 필터링)
         try:
             credential = json.loads(credential_path.read_text())
         except (json.JSONDecodeError, IOError):
             continue
 
-        # 만료 임박 토큰만 갱신
         if not is_token_expiring_soon(credential, hours=hours):
             continue
 
-        new_credential, error = refresh_access_token(credential)
-        if new_credential:
-            credential_path.write_text(json.dumps(new_credential, indent=2, ensure_ascii=False))
-            os.chmod(credential_path, 0o600)
+        # 안전한 갱신 (파일 락 + 신선도 체크)
+        new_credential, error = _safe_refresh_credential(credential_path, acc["id"])
 
+        if error and error.startswith("skip:"):
+            continue
+
+        if new_credential and not error:
             detected_plan = detect_plan_from_credential(new_credential)
             acc["plan"] = detected_plan
 

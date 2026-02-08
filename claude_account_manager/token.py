@@ -45,6 +45,29 @@ def is_token_expiring_soon(credential, hours=1):
     return datetime.now() > expires_datetime - timedelta(hours=hours)
 
 
+def is_token_fresh(credential, threshold_hours=7):
+    """토큰이 최근에 갱신되었는지 확인 (잔여 시간이 threshold 이상)
+
+    8시간 유효기간 중 잔여 시간이 threshold_hours 이상이면 '신선'하다고 판단.
+    다른 프로세스가 이미 갱신한 경우를 감지하는 데 사용.
+
+    Args:
+        credential: credential 딕셔너리
+        threshold_hours: 신선도 기준 시간 (기본 7시간)
+
+    Returns:
+        bool: 잔여 시간이 threshold 이상이면 True
+    """
+    oauth = credential.get("claudeAiOauth", {})
+    expires_at = oauth.get("expiresAt")
+    if not expires_at:
+        return False
+
+    expires_datetime = datetime.fromtimestamp(expires_at / 1000)
+    remaining = expires_datetime - datetime.now()
+    return remaining >= timedelta(hours=threshold_hours)
+
+
 def refresh_access_token(credential=None, credential_file=None):
     """
     Refresh token으로 access token 갱신
