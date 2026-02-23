@@ -13,6 +13,7 @@ from ..keychain import get_keychain_credential
 from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon, is_token_fresh
 from ..api import _fetch_usage_from_api
 from ..account import detect_plan_from_credential
+from ..logger import log, log_token_info
 
 
 def _safe_refresh_credential(credential_path, acc_id):
@@ -38,6 +39,7 @@ def _safe_refresh_credential(credential_path, acc_id):
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (IOError, OSError):
             # 다른 프로세스가 갱신 중 → 스킵
+            log("INFO", f"[{acc_id}] 락 획득 실패 → 다른 프로세스 갱신 중")
             return None, "skip:locked"
 
         # 2. 락 획득 후 credential 파일 다시 읽기 (다른 프로세스가 이미 갱신했을 수 있음)
@@ -48,21 +50,26 @@ def _safe_refresh_credential(credential_path, acc_id):
 
         # 3. 토큰 신선도 체크 (잔여 > 7시간이면 최근 갱신된 것)
         if is_token_fresh(credential):
+            log("INFO", f"[{acc_id}] 토큰 신선 → 스킵")
             return credential, "skip:fresh"
 
         # 4. refresh_access_token 호출
+        log_token_info(acc_id, credential, "갱신 전 ")
         new_credential, error = refresh_access_token(credential)
 
         if new_credential:
             # 5. 성공 → 파일 저장
             credential_path.write_text(json.dumps(new_credential, indent=2, ensure_ascii=False))
             os.chmod(credential_path, 0o600)
+            log_token_info(acc_id, new_credential, "갱신 후 ")
             return new_credential, None
 
         # 6. 실패 → 파일 다시 읽기 (다른 프로세스가 갱신했을 수 있음)
+        log("WARN", f"[{acc_id}] 갱신 실패: {error}")
         try:
             reread_credential = json.loads(credential_path.read_text())
             if is_token_fresh(reread_credential):
+                log("INFO", f"[{acc_id}] 실패했지만 파일 토큰 신선 → 다른 프로세스가 갱신한 듯")
                 return reread_credential, "skip:fresh_after_fail"
         except (json.JSONDecodeError, IOError):
             pass
@@ -164,9 +171,13 @@ def cmd_refresh_all():
     """
     index = load_index()
     if not index["accounts"]:
+        log("INFO", "cmd_refresh_all: 등록된 계정 없음")
         return 0
 
+    log("INFO", f"=== SessionStart: cmd_refresh_all 시작 (계정 {len(index['accounts'])}개) ===")
     refreshed_count = 0
+    skipped_count = 0
+    error_count = 0
     current = get_current_account()
     current_email = current.get("emailAddress", "") if current else ""
 
@@ -190,17 +201,22 @@ def cmd_refresh_all():
                 acc["plan"] = detected_plan
 
                 refreshed_count += 1
+                log_token_info(acc["id"], current_credential, "현재 계정 저장 ")
                 print(f"[refresh] {acc['id']}: 현재 계정 토큰 저장됨 [{detected_plan}]")
+            else:
+                log("WARN", f"[{acc['id']}] 현재 계정이지만 Keychain credential 없음")
             continue
 
         # 다른 계정은 안전한 갱신 (파일 락 + 신선도 체크)
         if not credential_path.exists():
+            log("WARN", f"[{acc['id']}] credential 파일 없음: {credential_file}")
             continue
 
         new_credential, error = _safe_refresh_credential(credential_path, acc["id"])
 
         if error and error.startswith("skip:"):
             # 스킵된 경우 (락 획득 실패 또는 이미 신선한 토큰)
+            skipped_count += 1
             reason = error.split(":", 1)[1]
             if reason == "locked":
                 print(f"[refresh] {acc['id']}: 다른 프로세스 갱신 중 → 스킵")
@@ -220,11 +236,14 @@ def cmd_refresh_all():
             refreshed_count += 1
             print(f"[refresh] {acc['id']}: 토큰 갱신됨 [{detected_plan}]")
         elif error:
+            error_count += 1
+            log("ERROR", f"[{acc['id']}] cmd_refresh_all 갱신 실패: {error}")
             print(f"[refresh] {acc['id']}: 갱신 실패 - {error}", file=sys.stderr)
 
     # index 저장 (Plan 정보 갱신)
     save_index(index)
 
+    log("INFO", f"cmd_refresh_all 완료 (갱신: {refreshed_count}, 스킵: {skipped_count}, 실패: {error_count})")
     return refreshed_count
 
 
@@ -244,7 +263,9 @@ def cmd_refresh_expiring(hours=1):
     if not index["accounts"]:
         return 0
 
+    log("INFO", f"--- PromptSubmit: cmd_refresh_expiring 시작 (기준: {hours}시간) ---")
     refreshed_count = 0
+    expiring_found = 0
     current = get_current_account()
     current_email = current.get("emailAddress", "") if current else ""
 
@@ -270,6 +291,9 @@ def cmd_refresh_expiring(hours=1):
         if not is_token_expiring_soon(credential, hours=hours):
             continue
 
+        expiring_found += 1
+        log_token_info(acc["id"], credential, "만료 임박 감지 ")
+
         # 안전한 갱신 (파일 락 + 신선도 체크)
         new_credential, error = _safe_refresh_credential(credential_path, acc["id"])
 
@@ -282,8 +306,15 @@ def cmd_refresh_expiring(hours=1):
 
             refreshed_count += 1
             print(f"[refresh] {acc['id']}: 만료 임박 토큰 갱신됨 [{detected_plan}]")
+        elif error:
+            log("ERROR", f"[{acc['id']}] 만료 임박 갱신 실패: {error}")
 
     if refreshed_count > 0:
         save_index(index)
+
+    if expiring_found == 0:
+        log("INFO", "cmd_refresh_expiring: 만료 임박 계정 없음")
+    else:
+        log("INFO", f"cmd_refresh_expiring 완료 (감지: {expiring_found}, 갱신: {refreshed_count})")
 
     return refreshed_count

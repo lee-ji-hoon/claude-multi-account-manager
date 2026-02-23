@@ -11,6 +11,7 @@ from .token_cmd import cmd_check, cmd_refresh_all, cmd_refresh_expiring
 from .misc_cmd import cmd_current, cmd_rename, cmd_set_plan, cmd_setup_hook, cmd_update, cmd_version, cmd_help
 from .import_cmd import cmd_import
 from .export_cmd import cmd_export_for_import
+from .logs_cmd import cmd_logs
 
 
 def main():
@@ -67,6 +68,9 @@ def main():
         sys.exit(0)
     elif args[0] == "setup-hook":
         cmd_setup_hook()
+    elif args[0] == "logs":
+        subcommand = args[1] if len(args) > 1 else None
+        cmd_logs(subcommand)
     elif args[0] == "check":
         cmd_check()
     elif args[0] == "update":
@@ -89,6 +93,7 @@ __all__ = [
     "cmd_remove",
     "cmd_import",
     "cmd_export_for_import",
+    "cmd_logs",
     "cmd_check",
     "cmd_refresh_all",
     "cmd_refresh_expiring",

@@ -9,6 +9,7 @@ import urllib.parse
 from datetime import datetime, timedelta
 
 from .keychain import get_keychain_credential, set_keychain_credential
+from .logger import log, log_token_info
 
 
 class TokenStatus:
@@ -79,16 +80,22 @@ def refresh_access_token(credential=None, credential_file=None):
                         - Path: 해당 파일에 저장 (저장된 계정)
     """
     from_keychain = credential is None
+    source = "keychain" if credential is None else ("file" if credential_file else "passed")
+
     if credential is None:
         credential = get_keychain_credential()
     if not credential:
+        log("WARN", f"refresh: credential 없음 (source={source})")
         return None, "credential 없음"
 
     oauth = credential.get("claudeAiOauth", {})
     refresh_token = oauth.get("refreshToken")
 
     if not refresh_token:
+        log("WARN", f"refresh: refresh token 없음 (source={source})")
         return None, "refresh token 없음"
+
+    log("INFO", f"refresh: 갱신 시작 (source={source})")
 
     try:
         # OAuth 토큰 갱신 요청
@@ -127,6 +134,13 @@ def refresh_access_token(credential=None, credential_file=None):
 
                 new_credential["claudeAiOauth"] = new_oauth
 
+                # 갱신 성공 로깅
+                new_expires = new_oauth.get("expiresAt")
+                if new_expires:
+                    from datetime import datetime as _dt
+                    new_exp_str = _dt.fromtimestamp(new_expires / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                    log("INFO", f"refresh: 갱신 성공 (새 만료: {new_exp_str}, source={source})")
+
                 # 저장 위치 결정
                 if credential_file:
                     # 파일에 저장 (저장된 계정)
@@ -152,10 +166,13 @@ def refresh_access_token(credential=None, credential_file=None):
             error_body = e.read().decode()
         except Exception:
             pass
+        log("ERROR", f"refresh: HTTP {e.code} - {error_body[:200]}")
         return None, f"토큰 갱신 실패 (HTTP {e.code}): {error_body}"
     except urllib.error.URLError as e:
+        log("ERROR", f"refresh: 연결 오류 - {e.reason}")
         return None, f"연결 오류: {e.reason}"
     except Exception as e:
+        log("ERROR", f"refresh: 예외 - {e}")
         return None, str(e)
 
     return None, "알 수 없는 오류"
