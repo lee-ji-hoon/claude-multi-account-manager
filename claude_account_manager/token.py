@@ -22,6 +22,29 @@ class TokenStatus:
     ERROR = "error"          # 기타 오류
 
 
+class RefreshError:
+    """토큰 갱신 실패 분류"""
+    PERMANENT = "permanent"  # invalid_grant, HTTP 400/401 → 재로그인 필요
+    TRANSIENT = "transient"  # 네트워크 오류, 타임아웃 → 일시적, 재시도 가능
+
+
+def classify_refresh_error(error_message):
+    """갱신 실패 에러 메시지를 영구적/일시적으로 분류"""
+    if not error_message:
+        return RefreshError.TRANSIENT
+
+    msg = error_message.lower()
+
+    # 영구적 실패: refresh token 자체가 무효
+    if "invalid_grant" in msg:
+        return RefreshError.PERMANENT
+    if "http 400" in msg or "http 401" in msg:
+        return RefreshError.PERMANENT
+
+    # 그 외는 일시적 (네트워크, 타임아웃 등)
+    return RefreshError.TRANSIENT
+
+
 def is_token_expired(credential):
     """토큰 만료 여부 확인 (expiresAt 기준)"""
     oauth = credential.get("claudeAiOauth", {})

@@ -9,6 +9,8 @@ from ..config import ACCOUNTS_DIR, PLAN_LIMITS_DAILY, PLAN_LIMITS_WEEKLY, RESET_
 from ..ui import c, Colors, format_tokens, make_progress_bar, format_time_remaining
 from ..storage import load_index, save_index, load_claude_json, save_claude_json, get_current_account
 from ..keychain import get_keychain_credential, set_keychain_credential
+from ..token import refresh_access_token, is_token_expiring_soon, RefreshError, classify_refresh_error
+from ..logger import log
 from ..account import estimate_plan
 from ..api import get_today_usage, get_weekly_usage, get_last_activity_time
 
@@ -166,14 +168,32 @@ def cmd_switch(account_id=None):
     claude_data["oauthAccount"] = new_oauth
     save_claude_json(claude_data)
 
-    # Replace Keychain credential
+    # Replace Keychain credential (토큰 갱신 포함)
     credential_switched = False
+    token_status = "no_credential"  # no_credential | fresh | refreshed | permanent_fail | transient_fail
     credential_file = account.get("credentialFile")
     if credential_file:
         credential_path = ACCOUNTS_DIR / credential_file
         if credential_path.exists():
             try:
                 new_credential = json.loads(credential_path.read_text())
+
+                # 토큰 잔여 시간 확인 (8시간 유효기간의 절반인 4시간 이하면 갱신)
+                if is_token_expiring_soon(new_credential, hours=4):
+                    log("INFO", f"switch: 토큰 갱신 필요 (잔여 4시간 이하), 갱신 시도 ({account['name']})")
+                    refreshed, error = refresh_access_token(new_credential, credential_file=credential_path)
+                    if refreshed:
+                        new_credential = refreshed
+                        token_status = "refreshed"
+                        log("INFO", f"switch: 토큰 갱신 성공 ({account['name']})")
+                    else:
+                        error_type = classify_refresh_error(error)
+                        token_status = "permanent_fail" if error_type == RefreshError.PERMANENT else "transient_fail"
+                        log("WARN", f"switch: 토큰 갱신 실패 ({account['name']}, {error_type}): {error}")
+                else:
+                    token_status = "fresh"
+
+                # 실패해도 credential은 적용 (일시적 에러의 경우 아직 유효할 수 있음)
                 if set_keychain_credential(new_credential):
                     credential_switched = True
             except json.JSONDecodeError:
@@ -189,7 +209,16 @@ def cmd_switch(account_id=None):
     print(f"  {account['name']} ({account['email']})")
 
     if credential_switched:
-        print(f"  OAuth: {c(Colors.GREEN, '토큰 교체 완료')}")
+        if token_status == "refreshed":
+            print(f"  OAuth: {c(Colors.GREEN, '토큰 갱신 후 교체 완료')}")
+        elif token_status == "permanent_fail":
+            print(f"  OAuth: {c(Colors.RED, '토큰 만료 (재로그인 필요)')}")
+            print(f"  {c(Colors.DIM, '→ /login 으로 재인증하세요')}")
+        elif token_status == "transient_fail":
+            print(f"  OAuth: {c(Colors.YELLOW, '토큰 갱신 실패 (네트워크 문제 가능)')}")
+            print(f"  {c(Colors.DIM, '→ 네트워크 확인 후 /account check 로 상태를 확인하세요')}")
+        else:
+            print(f"  OAuth: {c(Colors.GREEN, '토큰 교체 완료')}")
     else:
         print(f"  OAuth: {c(Colors.YELLOW, '토큰 없음 (재로그인 필요)')}")
 
