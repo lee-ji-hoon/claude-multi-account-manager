@@ -18,6 +18,10 @@ def _ensure_log_dir():
     """로그 디렉토리 생성"""
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
+        if not LOG_FILE.exists():
+            LOG_FILE.touch(mode=0o600)
+        elif (LOG_FILE.stat().st_mode & 0o777) != 0o600:
+            os.chmod(LOG_FILE, 0o600)
     except Exception:
         pass
 
