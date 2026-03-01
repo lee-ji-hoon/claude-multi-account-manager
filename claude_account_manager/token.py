@@ -8,6 +8,7 @@ import urllib.error
 import urllib.parse
 from datetime import datetime, timedelta
 
+from .config import TOKEN_VALIDITY_HOURS, TOKEN_FRESH_THRESHOLD_HOURS
 from .keychain import get_keychain_credential, set_keychain_credential
 from .logger import log, log_token_info
 
@@ -69,7 +70,7 @@ def is_token_expiring_soon(credential, hours=1):
     return datetime.now() > expires_datetime - timedelta(hours=hours)
 
 
-def is_token_fresh(credential, threshold_hours=7):
+def is_token_fresh(credential, threshold_hours=TOKEN_FRESH_THRESHOLD_HOURS):
     """토큰이 최근에 갱신되었는지 확인 (잔여 시간이 threshold 이상)
 
     8시간 유효기간 중 잔여 시간이 threshold_hours 이상이면 '신선'하다고 판단.
@@ -160,8 +161,7 @@ def refresh_access_token(credential=None, credential_file=None):
                 # 갱신 성공 로깅
                 new_expires = new_oauth.get("expiresAt")
                 if new_expires:
-                    from datetime import datetime as _dt
-                    new_exp_str = _dt.fromtimestamp(new_expires / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                    new_exp_str = datetime.fromtimestamp(new_expires / 1000).strftime("%Y-%m-%d %H:%M:%S")
                     log("INFO", f"refresh: 갱신 성공 (새 만료: {new_exp_str}, source={source})")
 
                 # 저장 위치 결정
@@ -212,12 +212,18 @@ def check_token_status(credential=None, auto_refresh=True):
     if not access_token:
         return TokenStatus.NO_TOKEN, None
 
+    already_tried_refresh = False
+
     # 만료 시간 미리 체크 (API 호출 전)
     if auto_refresh and is_token_expired(credential):
         new_credential, error = refresh_access_token(credential)
         if new_credential:
             return TokenStatus.REFRESHED, "토큰이 자동으로 갱신되었습니다."
-        # 갱신 실패하면 계속 진행하여 API로 확인
+        # 갱신 실패 - 에러 분류
+        already_tried_refresh = True
+        if classify_refresh_error(error) == RefreshError.PERMANENT:
+            return TokenStatus.EXPIRED, f"토큰 갱신 실패: {error}"
+        # 일시적 실패면 API로 확인 진행 (아직 유효할 수 있음)
 
     try:
         req = urllib.request.Request(
@@ -234,8 +240,7 @@ def check_token_status(credential=None, auto_refresh=True):
 
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            # 토큰 만료 - 자동 갱신 시도
-            if auto_refresh:
+            if auto_refresh and not already_tried_refresh:
                 new_credential, error = refresh_access_token(credential)
                 if new_credential:
                     return TokenStatus.REFRESHED, "토큰이 자동으로 갱신되었습니다."

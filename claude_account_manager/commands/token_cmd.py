@@ -16,7 +16,7 @@ from ..account import detect_plan_from_credential
 from ..logger import log, log_token_info
 
 
-def _safe_refresh_credential(credential_path, acc_id):
+def _safe_refresh_credential(credential_path, acc_id, skip_fresh_check=False):
     """파일 락을 사용하여 credential을 안전하게 갱신
 
     동시에 여러 프로세스가 같은 refresh token을 사용하는 것을 방지합니다.
@@ -25,6 +25,7 @@ def _safe_refresh_credential(credential_path, acc_id):
     Args:
         credential_path: credential 파일 경로 (Path 객체)
         acc_id: 계정 ID (로깅용)
+        skip_fresh_check: True이면 토큰 신선도 체크를 건너뛰고 항상 갱신 시도
 
     Returns:
         tuple: (new_credential or None, error_message or None)
@@ -49,17 +50,21 @@ def _safe_refresh_credential(credential_path, acc_id):
             return None, "credential 파일 읽기 실패"
 
         # 3. 토큰 신선도 체크 (잔여 > 7시간이면 최근 갱신된 것)
-        if is_token_fresh(credential):
-            log("INFO", f"[{acc_id}] 토큰 신선 → 스킵")
-            return credential, "skip:fresh"
+        if not skip_fresh_check:
+            if is_token_fresh(credential):
+                log("INFO", f"[{acc_id}] 토큰 신선 → 스킵")
+                return credential, "skip:fresh"
 
         # 4. refresh_access_token 호출
         log_token_info(acc_id, credential, "갱신 전 ")
         new_credential, error = refresh_access_token(credential)
 
         if new_credential:
-            # 5. 성공 → 파일 저장
-            credential_path.write_text(json.dumps(new_credential, indent=2, ensure_ascii=False))
+            # 5. 성공 → 파일 저장 (fsync로 원자적 기록 보장)
+            with open(credential_path, 'w', encoding='utf-8') as f:
+                f.write(json.dumps(new_credential, indent=2, ensure_ascii=False))
+                f.flush()
+                os.fsync(f.fileno())
             os.chmod(credential_path, 0o600)
             log_token_info(acc_id, new_credential, "갱신 후 ")
             return new_credential, None
@@ -193,8 +198,34 @@ def cmd_refresh_all():
             # Keychain에서 최신 토큰 가져와서 저장
             current_credential = get_keychain_credential()
             if current_credential:
-                credential_path.write_text(json.dumps(current_credential, indent=2, ensure_ascii=False))
-                os.chmod(credential_path, 0o600)
+                lock_path = credential_path.parent / f"{credential_path.name}.lock"
+                lock_fd = None
+                locked = False
+                try:
+                    lock_fd = open(lock_path, "w")
+                    try:
+                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        locked = True
+                    except (IOError, OSError):
+                        log("WARN", f"[{acc['id']}] 현재 계정 credential 락 획득 실패 → 스킵")
+
+                    if locked:
+                        with open(credential_path, 'w', encoding='utf-8') as f:
+                            f.write(json.dumps(current_credential, indent=2, ensure_ascii=False))
+                            f.flush()
+                            os.fsync(f.fileno())
+                        os.chmod(credential_path, 0o600)
+                finally:
+                    if lock_fd is not None:
+                        try:
+                            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                            lock_fd.close()
+                        except Exception:
+                            pass
+                        try:
+                            lock_path.unlink(missing_ok=True)
+                        except Exception:
+                            pass
 
                 # Plan도 갱신
                 detected_plan = detect_plan_from_credential(current_credential)
