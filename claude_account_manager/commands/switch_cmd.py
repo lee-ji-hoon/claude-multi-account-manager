@@ -9,7 +9,8 @@ from ..config import ACCOUNTS_DIR, PLAN_LIMITS_DAILY, PLAN_LIMITS_WEEKLY, RESET_
 from ..ui import c, Colors, format_tokens, make_progress_bar, format_time_remaining
 from ..storage import load_index, save_index, load_claude_json, save_claude_json, get_current_account
 from ..keychain import get_keychain_credential, set_keychain_credential
-from ..token import refresh_access_token, is_token_expiring_soon, RefreshError, classify_refresh_error
+from ..token import RefreshError, classify_refresh_error
+from .token_cmd import _safe_refresh_credential
 from ..logger import log
 from ..account import estimate_plan
 from ..api import get_today_usage, get_weekly_usage, get_last_activity_time
@@ -175,29 +176,30 @@ def cmd_switch(account_id=None):
     if credential_file:
         credential_path = ACCOUNTS_DIR / credential_file
         if credential_path.exists():
-            try:
-                new_credential = json.loads(credential_path.read_text())
+            new_credential, error = _safe_refresh_credential(credential_path, account['id'], skip_fresh_check=True)
+            if new_credential is not None and not error:
+                token_status = "refreshed"
+                log("INFO", f"switch: 토큰 갱신 성공 ({account['name']})")
+            elif error and error.startswith("skip:"):
+                # 락 충돌: 파일에서 직접 읽어서 사용
+                if new_credential is None:
+                    try:
+                        new_credential = json.loads(credential_path.read_text())
+                    except (json.JSONDecodeError, IOError):
+                        new_credential = None
+                token_status = "fresh"
+            else:
+                error_type = classify_refresh_error(error)
+                token_status = "permanent_fail" if error_type == RefreshError.PERMANENT else "transient_fail"
+                log("WARN", f"switch: 토큰 갱신 실패 ({account['name']}, {error_type}): {error}")
+                # 실패해도 기존 credential 파일에서 읽어서 적용 시도
+                try:
+                    new_credential = json.loads(credential_path.read_text())
+                except (json.JSONDecodeError, IOError):
+                    new_credential = None
 
-                # 토큰 잔여 시간 확인 (8시간 유효기간의 절반인 4시간 이하면 갱신)
-                if is_token_expiring_soon(new_credential, hours=4):
-                    log("INFO", f"switch: 토큰 갱신 필요 (잔여 4시간 이하), 갱신 시도 ({account['name']})")
-                    refreshed, error = refresh_access_token(new_credential, credential_file=credential_path)
-                    if refreshed:
-                        new_credential = refreshed
-                        token_status = "refreshed"
-                        log("INFO", f"switch: 토큰 갱신 성공 ({account['name']})")
-                    else:
-                        error_type = classify_refresh_error(error)
-                        token_status = "permanent_fail" if error_type == RefreshError.PERMANENT else "transient_fail"
-                        log("WARN", f"switch: 토큰 갱신 실패 ({account['name']}, {error_type}): {error}")
-                else:
-                    token_status = "fresh"
-
-                # 실패해도 credential은 적용 (일시적 에러의 경우 아직 유효할 수 있음)
-                if set_keychain_credential(new_credential):
-                    credential_switched = True
-            except json.JSONDecodeError:
-                pass
+            if new_credential and set_keychain_credential(new_credential):
+                credential_switched = True
 
     # Update active account
     index["activeAccountId"] = account_id
