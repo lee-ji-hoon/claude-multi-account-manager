@@ -189,8 +189,8 @@ def refresh_access_token(credential=None, credential_file=None):
             error_body = e.read().decode()
         except Exception:
             pass
-        log("ERROR", f"refresh: HTTP {e.code} - {error_body[:200]}")
-        return None, f"토큰 갱신 실패 (HTTP {e.code}): {error_body}"
+        log("ERROR", f"refresh: HTTP {e.code}")
+        return None, f"토큰 갱신 실패 (HTTP {e.code})"
     except urllib.error.URLError as e:
         log("ERROR", f"refresh: 연결 오류 - {e.reason}")
         return None, f"연결 오류: {e.reason}"
