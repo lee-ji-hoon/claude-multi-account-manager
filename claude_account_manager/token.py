@@ -8,7 +8,6 @@ import urllib.error
 import urllib.parse
 from datetime import datetime, timedelta
 
-from .config import TOKEN_VALIDITY_HOURS, TOKEN_FRESH_THRESHOLD_HOURS
 from .keychain import get_keychain_credential, set_keychain_credential
 from .logger import log, log_token_info
 
@@ -70,7 +69,7 @@ def is_token_expiring_soon(credential, hours=1):
     return datetime.now() > expires_datetime - timedelta(hours=hours)
 
 
-def is_token_fresh(credential, threshold_hours=TOKEN_FRESH_THRESHOLD_HOURS):
+def is_token_fresh(credential, threshold_hours=7):
     """토큰이 최근에 갱신되었는지 확인 (잔여 시간이 threshold 이상)
 
     8시간 유효기간 중 잔여 시간이 threshold_hours 이상이면 '신선'하다고 판단.
@@ -161,7 +160,8 @@ def refresh_access_token(credential=None, credential_file=None):
                 # 갱신 성공 로깅
                 new_expires = new_oauth.get("expiresAt")
                 if new_expires:
-                    new_exp_str = datetime.fromtimestamp(new_expires / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                    from datetime import datetime as _dt
+                    new_exp_str = _dt.fromtimestamp(new_expires / 1000).strftime("%Y-%m-%d %H:%M:%S")
                     log("INFO", f"refresh: 갱신 성공 (새 만료: {new_exp_str}, source={source})")
 
                 # 저장 위치 결정
@@ -189,8 +189,8 @@ def refresh_access_token(credential=None, credential_file=None):
             error_body = e.read().decode()
         except Exception:
             pass
-        log("ERROR", f"refresh: HTTP {e.code}")
-        return None, f"토큰 갱신 실패 (HTTP {e.code})"
+        log("ERROR", f"refresh: HTTP {e.code} - {error_body[:200]}")
+        return None, f"토큰 갱신 실패 (HTTP {e.code}): {error_body}"
     except urllib.error.URLError as e:
         log("ERROR", f"refresh: 연결 오류 - {e.reason}")
         return None, f"연결 오류: {e.reason}"

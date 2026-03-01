@@ -6,13 +6,6 @@ import json
 from .config import ACCOUNTS_DIR, INDEX_FILE, CLAUDE_JSON
 
 
-def _atomic_write(path, content):
-    """원자적 파일 쓰기 (임시 파일 → rename)"""
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(path)  # POSIX에서 원자적
-
-
 def ensure_accounts_dir():
     """accounts 디렉토리와 index.json 초기화"""
     ACCOUNTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -42,7 +35,7 @@ def load_index():
 
 def save_index(data):
     """index.json 저장"""
-    _atomic_write(INDEX_FILE, json.dumps(data, indent=2, ensure_ascii=False))
+    INDEX_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def load_claude_json():
@@ -58,7 +51,7 @@ def load_claude_json():
 
 def save_claude_json(data):
     """~/.claude.json 저장"""
-    _atomic_write(CLAUDE_JSON, json.dumps(data, indent=2, ensure_ascii=False))
+    CLAUDE_JSON.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def get_current_account():
