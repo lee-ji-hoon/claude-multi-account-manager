@@ -61,3 +61,7 @@ RESET_HOURS = {
     "Max": 5,  # 하위 호환
     "Unknown": 5,
 }
+
+# OAuth 토큰 설정
+TOKEN_VALIDITY_HOURS = 8       # 토큰 유효기간 (시간)
+TOKEN_FRESH_THRESHOLD_HOURS = 7  # 토큰 신선도 기준 (시간)
