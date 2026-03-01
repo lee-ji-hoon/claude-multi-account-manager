@@ -16,6 +16,16 @@ from ..account import estimate_plan
 from ..api import get_today_usage, get_weekly_usage, get_last_activity_time
 
 
+def _cleanup_old_backups(backup_dir, prefix, keep=5):
+    """오래된 백업 파일 정리 (최근 keep개만 유지)"""
+    files = sorted(backup_dir.glob(f"{prefix}_*.json"), key=lambda p: p.stat().st_mtime)
+    for old_file in files[:-keep]:
+        try:
+            old_file.unlink()
+        except Exception:
+            pass
+
+
 def cmd_switch(account_id=None):
     """다른 계정으로 전환 (대화형 선택 지원)"""
     index = load_index()
@@ -164,6 +174,10 @@ def cmd_switch(account_id=None):
         backup_cred_file = backup_dir / f"credential_{timestamp}.json"
         backup_cred_file.write_text(json.dumps(current_credential, indent=2, ensure_ascii=False))
         os.chmod(backup_cred_file, 0o600)
+
+    # 오래된 백업 정리
+    _cleanup_old_backups(backup_dir, "claude", keep=5)
+    _cleanup_old_backups(backup_dir, "credential", keep=5)
 
     # Replace oauthAccount
     claude_data["oauthAccount"] = new_oauth
