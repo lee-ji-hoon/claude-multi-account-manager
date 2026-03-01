@@ -4,6 +4,7 @@ macOS Keychain operations for credential management
 import hashlib
 import json
 import os
+import pwd
 import subprocess
 
 
@@ -17,7 +18,7 @@ def get_keychain_service():
 
 
 KEYCHAIN_SERVICE = get_keychain_service()
-KEYCHAIN_ACCOUNT = os.environ.get("USER", "unknown")
+KEYCHAIN_ACCOUNT = os.environ.get("USER") or pwd.getpwuid(os.getuid()).pw_name
 
 
 def get_keychain_credential():
@@ -46,6 +47,9 @@ def set_keychain_credential(credential_data):
             capture_output=True
         )
 
+        # NOTE: macOS security CLI는 -w 인자로만 password를 받을 수 있어
+        # 프로세스 목록(ps)에 순간적으로 credential이 노출될 수 있음.
+        # security CLI의 제약으로 stdin/pipe 전달은 불가.
         # 새 항목 추가
         result = subprocess.run(
             ["security", "add-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w", credential_json],
