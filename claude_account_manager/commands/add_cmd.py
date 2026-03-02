@@ -11,6 +11,7 @@ from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
 from ..keychain import get_keychain_credential
 from ..account import detect_plan_from_credential, generate_account_name, is_account_duplicate
+from ..token import is_credential_valid
 
 
 def cmd_add(name=None):
@@ -55,7 +56,7 @@ def cmd_add(name=None):
             if choice == "1" or choice == "":
                 # 기존 계정 토큰만 갱신
                 credential = get_keychain_credential()
-                if credential:
+                if credential and is_credential_valid(credential):
                     credential_path = ACCOUNTS_DIR / acc.get("credentialFile", f"credential_{acc['id']}.json")
                     credential_path.write_text(json.dumps(credential, indent=2, ensure_ascii=False))
                     os.chmod(credential_path, 0o600)
@@ -71,6 +72,8 @@ def cmd_add(name=None):
                     print()
                     print(c(Colors.GREEN, f"  토큰 갱신 완료: {acc['id']}"))
                     print(f"  Plan: {detected_plan} (자동 감지)")
+                elif credential:
+                    print(c(Colors.YELLOW, "  Keychain credential이 불완전합니다. 잠시 후 다시 시도하세요."))
                 else:
                     print(c(Colors.RED, "  토큰을 가져올 수 없습니다."))
                 return False
@@ -140,10 +143,12 @@ def cmd_add(name=None):
     credential_path = ACCOUNTS_DIR / credential_file
     credential = get_keychain_credential()
     has_credential = False
-    if credential:
+    if credential and is_credential_valid(credential):
         credential_path.write_text(json.dumps(credential, indent=2, ensure_ascii=False))
         os.chmod(credential_path, 0o600)
         has_credential = True
+    elif credential:
+        print(c(Colors.YELLOW, "  Keychain credential이 불완전합니다. 토큰 저장을 건너뜁니다."))
 
     # Update index
     index["accounts"].append({
@@ -200,6 +205,9 @@ def cmd_auto_add():
     credential = get_keychain_credential()
     if not credential:
         print("[auto-add] credential을 읽을 수 없습니다.", file=sys.stderr)
+        return False
+    if not is_credential_valid(credential):
+        print("[auto-add] credential이 불완전합니다 (토큰 갱신 중일 수 있음).", file=sys.stderr)
         return False
 
     plan = detect_plan_from_credential(credential)

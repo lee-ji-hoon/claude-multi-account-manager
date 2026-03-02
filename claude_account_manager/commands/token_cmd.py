@@ -10,7 +10,7 @@ from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
 from ..keychain import get_keychain_credential
-from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon, is_token_fresh
+from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon, is_token_fresh, is_credential_valid
 from ..api import _fetch_usage_from_api
 from ..account import detect_plan_from_credential
 from ..logger import log, log_token_info
@@ -198,6 +198,12 @@ def cmd_refresh_all():
             # Keychain에서 최신 토큰 가져와서 저장
             current_credential = get_keychain_credential()
             if current_credential:
+                # 유효성 검증: 불완전한 credential 저장 방지
+                if not is_credential_valid(current_credential):
+                    log("WARN", f"[{acc['id']}] Keychain credential 불완전 → 파일 저장 스킵")
+                    skipped_count += 1
+                    continue
+
                 lock_path = credential_path.parent / f"{credential_path.name}.lock"
                 lock_fd = None
                 locked = False

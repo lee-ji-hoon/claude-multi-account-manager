@@ -13,6 +13,21 @@ from .keychain import get_keychain_credential, set_keychain_credential
 from .logger import log, log_token_info
 
 
+def is_credential_valid(credential):
+    """credential이 파일 저장에 필요한 필수 필드를 갖추었는지 검증
+
+    Claude Code가 토큰 갱신 중일 때 Keychain에 불완전한 credential이
+    일시적으로 존재할 수 있음. 이 상태를 파일에 저장하면 데이터 유실 발생.
+
+    Returns:
+        bool: accessToken과 expiresAt이 모두 존재하면 True
+    """
+    if not credential:
+        return False
+    oauth = credential.get("claudeAiOauth", {})
+    return bool(oauth.get("accessToken")) and bool(oauth.get("expiresAt"))
+
+
 class TokenStatus:
     """토큰 상태 상수"""
     VALID = "valid"
@@ -135,7 +150,7 @@ def refresh_access_token(credential=None, credential_file=None):
             data=data,
             headers={
                 "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent": "claude-account-manager/1.0",
+                "User-Agent": "claude-account-manager/2.1.4",
             },
             method="POST",
         )
@@ -231,7 +246,7 @@ def check_token_status(credential=None, auto_refresh=True):
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "anthropic-beta": "oauth-2025-04-20",
-                "User-Agent": "claude-account-manager/1.0",
+                "User-Agent": "claude-account-manager/2.1.4",
             },
         )
 
