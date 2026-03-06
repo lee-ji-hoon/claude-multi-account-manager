@@ -2,7 +2,6 @@
 name: release
 description: 새 버전 릴리즈 (버전 업데이트 -> 커밋 -> 태그 -> main 머지 -> 푸시). "릴리즈", "배포", "release" 요청 시 사용.
 argument-hint: [버전] (예: 2.2.0)
-disable-model-invocation: true
 allowed-tools: [Bash, Read, Edit, AskUserQuestion]
 ---
 

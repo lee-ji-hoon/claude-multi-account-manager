@@ -2,7 +2,6 @@
 name: switch
 description: 다른 계정으로 전환. "계정 전환", "계정 바꾸기", "switch account" 요청 시 사용.
 argument-hint: [계정ID]
-disable-model-invocation: true
 allowed-tools: [Bash, AskUserQuestion]
 ---
 

@@ -2,7 +2,6 @@
 name: add
 description: 현재 로그인된 계정 저장. "계정 추가", "계정 저장", "add account" 요청 시 사용.
 argument-hint: [이름]
-disable-model-invocation: true
 allowed-tools: [Bash, AskUserQuestion]
 ---
 
