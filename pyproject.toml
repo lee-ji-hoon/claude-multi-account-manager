@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-account-manager"
-version = "2.1.10"
+version = "2.1.11"
 description = "Multi-account manager for Claude Code CLI"
 readme = "README.md"
 license = {text = "MIT"}

@@ -10,7 +10,7 @@
     {
       "name": "account",
       "description": "Claude Code multi-account manager plugin. Manage and switch between multiple accounts without logout.",
-      "version": "2.1.10",
+      "version": "2.1.11",
       "author": {
         "name": "lee-ji-hoon",
         "email": "lee-ji-hoon@example.com"
