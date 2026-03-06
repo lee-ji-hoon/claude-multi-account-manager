@@ -264,7 +264,7 @@ def _register_account(profile, credential):
         return False
 
     # ID 생성 (org 포함)
-    account_id = generate_account_id(email, org_name)
+    account_id = generate_account_id(email, org_name, org_uuid)
 
     # 계정명 결정
     name = profile.get("displayName", account_id)

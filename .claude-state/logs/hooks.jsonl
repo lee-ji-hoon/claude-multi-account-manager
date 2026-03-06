@@ -1,0 +1,7 @@
+{"level":"INFO","timestamp":"2026-03-06T04:59:59.326Z","message":"Skill trigger: ss:create-skill (priority 6)"}
+{"level":"INFO","timestamp":"2026-03-06T05:00:49.914Z","message":"Delegation warning for source file","file":"/Users/koni/Desktop/ai-work/claude-multi-account-manager/claude_account_manager/account.py"}
+{"level":"INFO","timestamp":"2026-03-06T05:00:54.071Z","message":"Delegation warning for source file","file":"/Users/koni/Desktop/ai-work/claude-multi-account-manager/claude_account_manager/commands/add_cmd.py"}
+{"level":"INFO","timestamp":"2026-03-06T05:00:58.514Z","message":"Delegation warning for source file","file":"/Users/koni/Desktop/ai-work/claude-multi-account-manager/claude_account_manager/commands/add_cmd.py"}
+{"level":"INFO","timestamp":"2026-03-06T05:01:01.990Z","message":"Delegation warning for source file","file":"/Users/koni/Desktop/ai-work/claude-multi-account-manager/claude_account_manager/commands/add_cmd.py"}
+{"level":"INFO","timestamp":"2026-03-06T05:01:05.832Z","message":"Delegation warning for source file","file":"/Users/koni/Desktop/ai-work/claude-multi-account-manager/claude_account_manager/commands/import_cmd.py"}
+{"level":"INFO","timestamp":"2026-03-06T05:01:39.788Z","message":"Delegation warning for source file","file":"/Users/koni/Desktop/ai-work/claude-multi-account-manager/claude_account_manager/commands/add_cmd.py"}

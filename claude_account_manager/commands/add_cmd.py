@@ -30,7 +30,7 @@ def cmd_add(name=None):
     org_name, org_uuid = get_org_info(current)
 
     # Generate ID from email + org
-    account_id = generate_account_id(email, org_name)
+    account_id = generate_account_id(email, org_name, org_uuid)
 
     if not name:
         name = current.get("displayName", account_id)
@@ -44,59 +44,60 @@ def cmd_add(name=None):
         stored_org = acc.get("organizationUuid")
         if stored_org and org_uuid and stored_org != org_uuid:
             continue
-        if stored_org or org_uuid:
-            if not stored_org and _is_real_org(org_name):
-                continue
+        if stored_org and not org_uuid:
+            continue
+        if not stored_org and org_uuid and _is_real_org(org_name):
+            continue
         # Match found
-            print(f"이미 등록된 계정입니다: {acc['id']} ({acc['name']})")
+        print(f"이미 등록된 계정입니다: {acc['id']} ({acc['name']})")
+        print()
+        print(c(Colors.DIM, "  " + "─" * 40))
+        print(f"  [1] 토큰만 갱신 (재로그인 없이)")
+        print(f"  [2] 새로 로그인 후 갱신")
+        print(f"  [3] 취소")
+        print(c(Colors.DIM, "  " + "─" * 40))
+        print(f"  {c(Colors.DIM, '번호를 입력하세요 (기본: 1)')}: ", end="", flush=True)
+
+        try:
+            choice = input().strip()
+        except (EOFError, KeyboardInterrupt):
             print()
-            print(c(Colors.DIM, "  " + "─" * 40))
-            print(f"  [1] 토큰만 갱신 (재로그인 없이)")
-            print(f"  [2] 새로 로그인 후 갱신")
-            print(f"  [3] 취소")
-            print(c(Colors.DIM, "  " + "─" * 40))
-            print(f"  {c(Colors.DIM, '번호를 입력하세요 (기본: 1)')}: ", end="", flush=True)
+            print("취소됨")
+            return False
 
-            try:
-                choice = input().strip()
-            except (EOFError, KeyboardInterrupt):
+        if choice == "1" or choice == "":
+            # 기존 계정 토큰만 갱신
+            credential = get_keychain_credential()
+            if credential and is_credential_valid(credential):
+                credential_path = ACCOUNTS_DIR / acc.get("credentialFile", f"credential_{acc['id']}.json")
+                credential_path.write_text(json.dumps(credential, indent=2, ensure_ascii=False))
+                os.chmod(credential_path, 0o600)
+
+                # Plan도 자동 감지해서 갱신
+                detected_plan = detect_plan_from_credential(credential)
+                for i, a in enumerate(index["accounts"]):
+                    if a["id"] == acc["id"]:
+                        index["accounts"][i]["plan"] = detected_plan
+                        break
+                save_index(index)
+
                 print()
-                print("취소됨")
-                return False
-
-            if choice == "1" or choice == "":
-                # 기존 계정 토큰만 갱신
-                credential = get_keychain_credential()
-                if credential and is_credential_valid(credential):
-                    credential_path = ACCOUNTS_DIR / acc.get("credentialFile", f"credential_{acc['id']}.json")
-                    credential_path.write_text(json.dumps(credential, indent=2, ensure_ascii=False))
-                    os.chmod(credential_path, 0o600)
-
-                    # Plan도 자동 감지해서 갱신
-                    detected_plan = detect_plan_from_credential(credential)
-                    for i, a in enumerate(index["accounts"]):
-                        if a["id"] == acc["id"]:
-                            index["accounts"][i]["plan"] = detected_plan
-                            break
-                    save_index(index)
-
-                    print()
-                    print(c(Colors.GREEN, f"  토큰 갱신 완료: {acc['id']}"))
-                    print(f"  Plan: {detected_plan} (자동 감지)")
-                elif credential:
-                    print(c(Colors.YELLOW, "  Keychain credential이 불완전합니다. 잠시 후 다시 시도하세요."))
-                else:
-                    print(c(Colors.RED, "  토큰을 가져올 수 없습니다."))
-                return False
-            elif choice == "2":
-                # 새로 로그인 요청
-                print()
-                print(c(Colors.YELLOW, "  새로 로그인해주세요: /login"))
-                print(c(Colors.DIM, "  로그인 후 다시 /account-add 를 실행하세요."))
-                return "need_login"
+                print(c(Colors.GREEN, f"  토큰 갱신 완료: {acc['id']}"))
+                print(f"  Plan: {detected_plan} (자동 감지)")
+            elif credential:
+                print(c(Colors.YELLOW, "  Keychain credential이 불완전합니다. 잠시 후 다시 시도하세요."))
             else:
-                print("취소됨")
-                return False
+                print(c(Colors.RED, "  토큰을 가져올 수 없습니다."))
+            return False
+        elif choice == "2":
+            # 새로 로그인 요청
+            print()
+            print(c(Colors.YELLOW, "  새로 로그인해주세요: /login"))
+            print(c(Colors.DIM, "  로그인 후 다시 /account-add 를 실행하세요."))
+            return "need_login"
+        else:
+            print("취소됨")
+            return False
 
     # credential에서 Plan 자동 감지
     credential = get_keychain_credential()
@@ -237,7 +238,7 @@ def cmd_auto_add():
     name = generate_account_name(current, email)
 
     # 5. ID 생성 (org 포함)
-    account_id = generate_account_id(email, org_name)
+    account_id = generate_account_id(email, org_name, org_uuid)
 
     # 6. 프로필 저장
     profile_file = f"profile_{account_id}.json"

@@ -88,18 +88,33 @@ def generate_account_name(oauth_account, email):
     return f"Account_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 
-def generate_account_id(email, org_name=None):
+def generate_account_id(email, org_name=None, org_uuid=None):
     """email과 organization으로 고유 account_id 생성
 
     Team/Organization 계정은 org 이름을 suffix로 추가하여 동일 이메일 구분.
+    동일 org 이름(case-insensitive)이지만 UUID가 다른 경우 UUID 앞 8자를 추가하여 충돌 방지.
     개인 계정은 email만 사용 (기존 호환).
     """
     base = email.split("@")[0].replace(".", "_").replace("+", "_").lower()
     if _is_real_org(org_name):
         org_suffix = re.sub(r'[^a-z0-9]', '_', org_name.lower()).strip('_')
         org_suffix = re.sub(r'_+', '_', org_suffix)
+        candidate = f"{base}_{org_suffix}"
+        if org_uuid and _has_id_conflict(candidate, org_uuid):
+            org_suffix += f"_{org_uuid[:8]}"
         return f"{base}_{org_suffix}"
     return base
+
+
+def _has_id_conflict(candidate_id, org_uuid):
+    """동일 account_id가 이미 존재하면서 UUID가 다른 경우 충돌 감지"""
+    index = load_index()
+    for acc in index.get("accounts", []):
+        if acc.get("id") == candidate_id:
+            stored_uuid = acc.get("organizationUuid", "")
+            if stored_uuid and stored_uuid != org_uuid:
+                return True
+    return False
 
 
 def is_account_duplicate(email, org_uuid=None):
