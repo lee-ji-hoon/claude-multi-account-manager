@@ -140,14 +140,16 @@ def is_same_account(acc, current_oauth):
     """저장된 계정(index entry)과 현재 oauthAccount가 동일한지 확인
 
     organizationUuid가 저장된 계정은 email + org로 비교.
-    Legacy 계정(org 미저장)은 email만으로 비교.
+    org 없는 계정은 현재 계정도 org가 없을 때만 매칭.
     """
     if acc.get("email") != current_oauth.get("emailAddress", ""):
         return False
     stored_org = acc.get("organizationUuid")
+    current_org = current_oauth.get("organizationUuid", "")
     if stored_org:
-        return stored_org == current_oauth.get("organizationUuid", "")
-    return True
+        return stored_org == current_org
+    # 저장된 계정에 org 없으면, 현재 계정도 org 없어야 동일 계정
+    return not current_org
 
 
 def get_org_info(oauth_account):

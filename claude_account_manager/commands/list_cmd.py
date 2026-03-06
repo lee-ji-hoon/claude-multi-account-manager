@@ -141,14 +141,12 @@ def cmd_list():
             }
             plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
 
-            # 출력: [번호] ● name [Plan] - 상태
+            # 출력: [번호] ● name (org) [Plan] - 상태
             status_text = f" - {status}" if status else ""
-            print(f"  [{i}] {marker} {acc['name']} {plan_badge}{status_text}")
-            org_display = ""
             acc_org_name = acc.get("organizationName", "")
-            if _is_real_org(acc_org_name):
-                org_display = f" ({acc_org_name})"
-            print(f"      {c(Colors.DIM, acc['email'] + org_display)}")
+            org_badge = f" {c(Colors.MAGENTA, f'@{acc_org_name}')}" if _is_real_org(acc_org_name) else ""
+            print(f"  [{i}] {marker} {acc['name']}{org_badge} {plan_badge}{status_text}")
+            print(f"      {c(Colors.DIM, acc['email'])}")
 
             # 사용량 표시 (미리 가져온 데이터 사용)
             real_usage = usage_map.get(acc["id"])

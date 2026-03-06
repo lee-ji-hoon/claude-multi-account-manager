@@ -70,12 +70,10 @@ def cmd_switch(account_id=None):
             plan_colors = {"Free": Colors.DIM, "Pro": Colors.CYAN, "Team": Colors.MAGENTA, "Max": Colors.YELLOW, "Max5": Colors.YELLOW, "Max20": Colors.GREEN}
             plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
 
-            print(f"  [{i}] {marker} {acc['name']} {plan_badge}")
-            org_display = ""
             acc_org_name = acc.get("organizationName", "")
-            if _is_real_org(acc_org_name):
-                org_display = f" ({acc_org_name})"
-            print(f"      {c(Colors.DIM, acc['email'] + org_display)}")
+            org_badge = f" {c(Colors.MAGENTA, f'@{acc_org_name}')}" if _is_real_org(acc_org_name) else ""
+            print(f"  [{i}] {marker} {acc['name']}{org_badge} {plan_badge}")
+            print(f"      {c(Colors.DIM, acc['email'])}")
 
             # 현재 계정이면 사용량 표시
             if is_current:
