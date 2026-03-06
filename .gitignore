@@ -43,3 +43,4 @@ Thumbs.db
 
 # Claude Code user config
 .claude/
+.claude-state/
