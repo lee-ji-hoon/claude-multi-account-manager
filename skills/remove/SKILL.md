@@ -1,5 +1,4 @@
 ---
-name: remove
 description: 저장된 계정 삭제. "계정 삭제", "계정 제거", "remove account" 요청 시 사용.
 argument-hint: [계정ID]
 allowed-tools: [Bash, AskUserQuestion]

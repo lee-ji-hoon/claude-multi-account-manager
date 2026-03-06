@@ -1,5 +1,4 @@
 ---
-name: import
 description: 다른 컴의 계정 가져오기. "계정 가져오기", "import" 요청 시 사용.
 argument-hint: [JSON 또는 파일경로]
 allowed-tools: [Bash, AskUserQuestion]

@@ -1,5 +1,4 @@
 ---
-name: export
 description: 현재 계정 정보 추출 (다른 컴으로 옮기기). "계정 내보내기", "export" 요청 시 사용.
 allowed-tools: [Bash]
 ---

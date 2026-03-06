@@ -1,5 +1,4 @@
 ---
-name: list
 description: 등록된 계정 목록 및 사용량 표시. "계정 목록", "계정 보기", "list accounts" 요청 시 사용.
 allowed-tools: [Bash]
 ---

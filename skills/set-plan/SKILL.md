@@ -1,5 +1,4 @@
 ---
-name: set-plan
 description: 계정의 Plan 수동 설정. "Plan 변경", "플랜 설정", "set plan" 요청 시 사용.
 argument-hint: [계정ID] [Plan]
 allowed-tools: [Bash, AskUserQuestion]
