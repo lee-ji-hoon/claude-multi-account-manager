@@ -11,7 +11,7 @@ from ..storage import load_index, get_current_account
 from ..keychain import get_keychain_credential
 from ..token import TokenStatus
 from ..api import _fetch_usage_from_api
-from ..account import estimate_plan
+from ..account import estimate_plan, is_same_account, _is_real_org
 
 
 def _get_token_expires_at(credential):
@@ -33,6 +33,9 @@ def cmd_list():
     current_email = current.get("emailAddress", "")
     current_plan = estimate_plan(current)
 
+    def _is_current(acc):
+        return is_same_account(acc, current)
+
     # 헤더
     print()
     print(c(Colors.BOLD, "  Claude 계정 목록"))
@@ -45,7 +48,7 @@ def cmd_list():
         # 병렬로 모든 계정의 사용량 가져오기
         def fetch_account_usage(acc):
             """계정별 사용량 및 토큰 상태 가져오기 (401 시 자동 갱신 포함)"""
-            is_current = acc["email"] == current_email
+            is_current = _is_current(acc)
             if is_current:
                 # 현재 계정: Keychain 사용, credential_file=None
                 usage, token_status = _fetch_usage_from_api(include_token_status=True)
@@ -96,7 +99,7 @@ def cmd_list():
         # 결과 출력
         for i, acc in enumerate(index["accounts"], 1):
             is_active = acc["id"] == index.get("activeAccountId")
-            is_current = acc["email"] == current_email
+            is_current = _is_current(acc)
 
             if is_active and is_current:
                 marker = c(Colors.GREEN, "●")
@@ -141,7 +144,11 @@ def cmd_list():
             # 출력: [번호] ● name [Plan] - 상태
             status_text = f" - {status}" if status else ""
             print(f"  [{i}] {marker} {acc['name']} {plan_badge}{status_text}")
-            print(f"      {c(Colors.DIM, acc['email'])}")
+            org_display = ""
+            acc_org_name = acc.get("organizationName", "")
+            if _is_real_org(acc_org_name):
+                org_display = f" ({acc_org_name})"
+            print(f"      {c(Colors.DIM, acc['email'] + org_display)}")
 
             # 사용량 표시 (미리 가져온 데이터 사용)
             real_usage = usage_map.get(acc["id"])

@@ -12,7 +12,7 @@ from ..keychain import get_keychain_credential, set_keychain_credential
 from ..token import RefreshError, classify_refresh_error
 from .token_cmd import _safe_refresh_credential
 from ..logger import log
-from ..account import estimate_plan
+from ..account import estimate_plan, is_same_account, _is_real_org
 from ..api import get_today_usage, get_weekly_usage, get_last_activity_time
 
 
@@ -48,7 +48,7 @@ def cmd_switch(account_id=None):
         last_activity = get_last_activity_time()
 
         for i, acc in enumerate(index["accounts"], 1):
-            is_current = acc["email"] == current_email
+            is_current = is_same_account(acc, current)
             marker = c(Colors.GREEN, "●") if is_current else " "
 
             # Plan 정보
@@ -71,7 +71,11 @@ def cmd_switch(account_id=None):
             plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
 
             print(f"  [{i}] {marker} {acc['name']} {plan_badge}")
-            print(f"      {c(Colors.DIM, acc['email'])}")
+            org_display = ""
+            acc_org_name = acc.get("organizationName", "")
+            if _is_real_org(acc_org_name):
+                org_display = f" ({acc_org_name})"
+            print(f"      {c(Colors.DIM, acc['email'] + org_display)}")
 
             # 현재 계정이면 사용량 표시
             if is_current:
@@ -154,7 +158,7 @@ def cmd_switch(account_id=None):
 
     # Check if already active
     current = get_current_account()
-    if current.get("emailAddress") == account["email"]:
+    if is_same_account(account, current):
         print(f"이미 해당 계정으로 로그인되어 있습니다: {account['name']}")
         return True
 

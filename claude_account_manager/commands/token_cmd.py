@@ -12,7 +12,7 @@ from ..storage import load_index, save_index, get_current_account
 from ..keychain import get_keychain_credential
 from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon, is_token_fresh, is_credential_valid
 from ..api import _fetch_usage_from_api
-from ..account import detect_plan_from_credential
+from ..account import detect_plan_from_credential, is_same_account
 from ..logger import log, log_token_info
 
 
@@ -184,7 +184,6 @@ def cmd_refresh_all():
     skipped_count = 0
     error_count = 0
     current = get_current_account()
-    current_email = current.get("emailAddress", "") if current else ""
 
     for acc in index["accounts"]:
         credential_file = acc.get("credentialFile")
@@ -194,7 +193,7 @@ def cmd_refresh_all():
         credential_path = ACCOUNTS_DIR / credential_file
 
         # 현재 로그인된 계정 처리
-        if acc["email"] == current_email:
+        if current and is_same_account(acc, current):
             # Keychain에서 최신 토큰 가져와서 저장
             current_credential = get_keychain_credential()
             if current_credential:
@@ -304,11 +303,10 @@ def cmd_refresh_expiring(hours=1):
     refreshed_count = 0
     expiring_found = 0
     current = get_current_account()
-    current_email = current.get("emailAddress", "") if current else ""
 
     for acc in index["accounts"]:
         # 현재 계정은 스킵 (이미 활성 상태)
-        if acc["email"] == current_email:
+        if current and is_same_account(acc, current):
             continue
 
         credential_file = acc.get("credentialFile")

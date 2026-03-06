@@ -1,5 +1,6 @@
 ---
-description: OAuth 토큰 상태 확인
+name: check
+description: OAuth 토큰 상태 확인. "토큰 확인", "토큰 상태", "check token" 요청 시 사용.
 allowed-tools: [Bash]
 ---
 

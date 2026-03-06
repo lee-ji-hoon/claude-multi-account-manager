@@ -6,6 +6,7 @@ import json
 from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
+from ..account import is_same_account, _is_real_org
 
 
 def cmd_remove(account_id=None):
@@ -23,14 +24,17 @@ def cmd_remove(account_id=None):
         print(c(Colors.DIM, "  " + "─" * 55))
 
         current = get_current_account()
-        current_email = current.get("emailAddress", "") if current else ""
 
         for i, acc in enumerate(index["accounts"], 1):
-            is_current = acc["email"] == current_email
+            is_current = is_same_account(acc, current) if current else False
             marker = c(Colors.GREEN, "●") if is_current else " "
             plan_badge = c(Colors.DIM, f"[{acc.get('plan', '?')}]")
             print(f"  [{i}] {marker} {acc['name']} {plan_badge}")
-            print(f"      {c(Colors.DIM, acc['email'])}")
+            org_display = ""
+            acc_org_name = acc.get("organizationName", "")
+            if _is_real_org(acc_org_name):
+                org_display = f" ({acc_org_name})"
+            print(f"      {c(Colors.DIM, acc['email'] + org_display)}")
 
         print(c(Colors.DIM, "  " + "─" * 55))
         print(f"  {c(Colors.DIM, '번호를 입력하세요 (취소: q)')}: ", end="", flush=True)

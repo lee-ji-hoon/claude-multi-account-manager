@@ -1,6 +1,8 @@
 ---
-description: 저장된 계정 삭제
+name: remove
+description: 저장된 계정 삭제. "계정 삭제", "계정 제거", "remove account" 요청 시 사용.
 argument-hint: [계정ID]
+disable-model-invocation: true
 allowed-tools: [Bash, AskUserQuestion]
 ---
 
@@ -8,20 +10,16 @@ allowed-tools: [Bash, AskUserQuestion]
 
 저장된 계정을 삭제합니다.
 
-## Arguments
-
-$ARGUMENTS
-
 ## Instructions
 
-1. 먼저 계정 목록을 확인하고 **결과를 사용자에게 그대로 출력**하세요:
+1. 계정 목록을 확인하고 **결과를 사용자에게 그대로 출력**하세요:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" list
 ```
 
 2. 계정ID가 인자로 제공되지 않은 경우:
-   - AskUserQuestion 도구를 사용하여 사용자에게 삭제할 계정을 선택하도록 질문하세요
-   - 선택지에 각 계정의 이름, Plan, 이메일을 표시하세요
+   - AskUserQuestion으로 삭제할 계정을 선택하도록 질문하세요
+   - 각 계정의 이름, Plan, 이메일을 표시하세요
    - "취소" 옵션도 포함하세요
 
 3. 삭제 확인:
@@ -30,7 +28,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" list
 
 4. 확인된 경우 삭제 실행하고 **결과를 사용자에게 그대로 출력**하세요:
 ```bash
-echo "y" | python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" remove <선택된_계정ID>
+echo "y" | python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" remove $ARGUMENTS
 ```
 
 **중요**: 모든 명령 실행 후 출력 결과를 코드 블록 없이 그대로 사용자에게 보여주세요.

@@ -1,5 +1,6 @@
 ---
-description: 등록된 계정 목록 및 사용량 표시
+name: list
+description: 등록된 계정 목록 및 사용량 표시. "계정 목록", "계정 보기", "list accounts" 요청 시 사용.
 allowed-tools: [Bash]
 ---
 
@@ -19,7 +20,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" list
 
 ## Features
 
-- 모든 등록된 계정 표시
+- 모든 등록된 계정 표시 (Team/Organization 구분)
 - 현재 세션 / 주간 사용량 프로그레스 바
 - 리셋까지 남은 시간
 - 토큰 만료까지 남은 시간

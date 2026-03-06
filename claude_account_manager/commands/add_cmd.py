@@ -10,7 +10,7 @@ from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
 from ..keychain import get_keychain_credential
-from ..account import detect_plan_from_credential, generate_account_name, is_account_duplicate
+from ..account import detect_plan_from_credential, generate_account_name, generate_account_id, is_account_duplicate, get_org_info, _is_real_org
 from ..token import is_credential_valid
 
 
@@ -26,17 +26,28 @@ def cmd_add(name=None):
         print("계정 이메일을 찾을 수 없습니다.")
         return False
 
-    # Generate ID from email
-    account_id = email.split("@")[0].replace(".", "_").replace("+", "_").lower()
+    # Organization 정보 추출
+    org_name, org_uuid = get_org_info(current)
+
+    # Generate ID from email + org
+    account_id = generate_account_id(email, org_name)
 
     if not name:
         name = current.get("displayName", account_id)
 
     index = load_index()
 
-    # Check if already exists
+    # Check if already exists (email + org)
     for acc in index["accounts"]:
-        if acc["email"] == email:
+        if acc["email"] != email:
+            continue
+        stored_org = acc.get("organizationUuid")
+        if stored_org and org_uuid and stored_org != org_uuid:
+            continue
+        if stored_org or org_uuid:
+            if not stored_org and _is_real_org(org_name):
+                continue
+        # Match found
             print(f"이미 등록된 계정입니다: {acc['id']} ({acc['name']})")
             print()
             print(c(Colors.DIM, "  " + "─" * 40))
@@ -151,7 +162,7 @@ def cmd_add(name=None):
         print(c(Colors.YELLOW, "  Keychain credential이 불완전합니다. 토큰 저장을 건너뜁니다."))
 
     # Update index
-    index["accounts"].append({
+    account_entry = {
         "id": account_id,
         "name": name,
         "email": email,
@@ -159,7 +170,12 @@ def cmd_add(name=None):
         "profileFile": profile_file,
         "credentialFile": credential_file if has_credential else None,
         "createdAt": datetime.now().isoformat()
-    })
+    }
+    if org_name:
+        account_entry["organizationName"] = org_name
+    if org_uuid:
+        account_entry["organizationUuid"] = org_uuid
+    index["accounts"].append(account_entry)
     index["activeAccountId"] = account_id
     save_index(index)
 
@@ -169,6 +185,8 @@ def cmd_add(name=None):
     print(f"  ID: {account_id}")
     print(f"  이름: {name}")
     print(f"  이메일: {email}")
+    if _is_real_org(org_name):
+        print(f"  조직: {org_name}")
     print(f"  Plan: {plan}")
     if has_credential:
         print(f"  OAuth: {c(Colors.GREEN, '저장됨')}")
@@ -197,8 +215,11 @@ def cmd_auto_add():
     if not email:
         return False  # 이메일 없음
 
-    # 2. 중복 확인 (조용히 스킵)
-    if is_account_duplicate(email):
+    # Organization 정보 추출
+    org_name, org_uuid = get_org_info(current)
+
+    # 2. 중복 확인 (조용히 스킵) - email + org
+    if is_account_duplicate(email, org_uuid):
         return False  # 이미 등록됨
 
     # 3. credential에서 Plan 감지
@@ -215,8 +236,8 @@ def cmd_auto_add():
     # 4. 이름 자동 생성
     name = generate_account_name(current, email)
 
-    # 5. ID 생성
-    account_id = email.split("@")[0].replace(".", "_").replace("+", "_").lower()
+    # 5. ID 생성 (org 포함)
+    account_id = generate_account_id(email, org_name)
 
     # 6. 프로필 저장
     profile_file = f"profile_{account_id}.json"
@@ -232,7 +253,7 @@ def cmd_auto_add():
 
     # 8. index 업데이트
     index = load_index()
-    index["accounts"].append({
+    account_entry = {
         "id": account_id,
         "name": name,
         "email": email,
@@ -240,10 +261,16 @@ def cmd_auto_add():
         "profileFile": profile_file,
         "credentialFile": credential_file,
         "createdAt": datetime.now().isoformat()
-    })
+    }
+    if org_name:
+        account_entry["organizationName"] = org_name
+    if org_uuid:
+        account_entry["organizationUuid"] = org_uuid
+    index["accounts"].append(account_entry)
     index["activeAccountId"] = account_id
     save_index(index)
 
     # 9. 성공 메시지
-    print(f"[auto-add] 계정 등록됨: {name} ({email}) [{plan}]")
+    org_suffix = f" @{org_name}" if _is_real_org(org_name) else ""
+    print(f"[auto-add] 계정 등록됨: {name} ({email}{org_suffix}) [{plan}]")
     return True

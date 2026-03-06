@@ -12,7 +12,7 @@ from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors
 from ..storage import load_index, save_index, load_claude_json
 from ..keychain import set_keychain_credential
-from ..account import detect_plan_from_credential, is_account_duplicate
+from ..account import detect_plan_from_credential, is_account_duplicate, generate_account_id, get_org_info, _is_real_org
 
 
 def cmd_import(json_data=None):
@@ -254,13 +254,17 @@ def _register_account(profile, credential):
         print(c(Colors.RED, "  프로필에 emailAddress가 없습니다."))
         return False
 
-    # 중복 확인
-    if is_account_duplicate(email):
-        print(c(Colors.RED, f"  이미 등록된 계정입니다: {email}"))
+    # Organization 정보 추출
+    org_name, org_uuid = get_org_info(profile)
+
+    # 중복 확인 (email + org)
+    if is_account_duplicate(email, org_uuid):
+        org_suffix = f" ({org_name})" if _is_real_org(org_name) else ""
+        print(c(Colors.RED, f"  이미 등록된 계정입니다: {email}{org_suffix}"))
         return False
 
-    # ID 생성
-    account_id = email.split("@")[0].replace(".", "_").replace("+", "_").lower()
+    # ID 생성 (org 포함)
+    account_id = generate_account_id(email, org_name)
 
     # 계정명 결정
     name = profile.get("displayName", account_id)
@@ -285,7 +289,7 @@ def _register_account(profile, credential):
 
     # Index 업데이트
     index = load_index()
-    index["accounts"].append({
+    account_entry = {
         "id": account_id,
         "name": name,
         "email": email,
@@ -293,7 +297,12 @@ def _register_account(profile, credential):
         "profileFile": profile_file,
         "credentialFile": credential_file,
         "createdAt": datetime.now().isoformat()
-    })
+    }
+    if org_name:
+        account_entry["organizationName"] = org_name
+    if org_uuid:
+        account_entry["organizationUuid"] = org_uuid
+    index["accounts"].append(account_entry)
     index["activeAccountId"] = account_id
     save_index(index)
 
@@ -304,6 +313,8 @@ def _register_account(profile, credential):
     print(f"  ID: {account_id}")
     print(f"  이름: {name}")
     print(f"  이메일: {email}")
+    if _is_real_org(org_name):
+        print(f"  조직: {org_name}")
     print(f"  Plan: {plan}")
     if keychain_saved:
         print(f"  Keychain: {c(Colors.GREEN, '저장됨')}")
