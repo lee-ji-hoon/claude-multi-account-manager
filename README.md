@@ -112,6 +112,39 @@ cl -c              # 바로 continue (이전 대화)
 - **다중 맥 동기화** - 텔레그램 기반 push/pull
 - **대화형 런처** - 계정 선택 + 세션 관리
 
+## Obsidian 대시보드
+
+Google Drive Obsidian 볼트에 Claude Code 상태를 5분마다 자동 기록합니다.
+
+표시 내용: 계정 목록, 사용량(5h/7d), 토큰 만료 시간, tmux 세션, 프로세스 수, 통계
+
+```bash
+# 수동 실행
+python3 bin/claude-dashboard
+
+# launchd 설치 (5분 주기 자동 갱신)
+cp bin/com.claude-dashboard.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.claude-dashboard.plist
+
+# 로그 확인
+tail -f /tmp/claude-dashboard.log
+```
+
+## ttyd 웹 터미널
+
+tmux 세션을 브라우저에서 read-only로 확인할 수 있습니다.
+
+```bash
+# 설치 + launchd 등록
+./bin/setup-ttyd.sh
+
+# 또는 수동
+brew install ttyd
+ttyd -R -p 7681 tmux attach -t tg-bridge
+```
+
+Tailscale과 함께 사용하면 폰에서도 `http://<tailscale-ip>:7681`로 접근 가능합니다.
+
 ## 요구사항
 
 - macOS (Keychain 사용)
