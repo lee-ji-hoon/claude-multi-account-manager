@@ -43,6 +43,8 @@ flowchart LR
 | `/account:check` | 토큰 상태 확인 |
 | `/account:remove <id>` | 계정 삭제 |
 | `/account:set-plan <id> <plan>` | Plan 설정 |
+| `/account:push` | 계정 데이터를 텔레그램으로 전송 (다른 맥 동기화) |
+| `/account:pull` | 텔레그램에서 계정 데이터 가져오기 |
 
 ## 예시
 
@@ -61,6 +63,45 @@ flowchart LR
   ───────────────────────────────────────────────────────
 ```
 
+## 터미널 런처
+
+Claude Code를 시작하기 전에 계정/세션을 선택할 수 있는 런처:
+
+```bash
+cl                 # 대화형 런처
+cl -c              # 바로 continue (이전 대화)
+```
+
+```
+  Claude Code Launcher
+  ==================================================
+  현재: work@company.com @Team [Max5]
+  사용량: ██████░░░░ 45%
+
+  실행 중인 세션:
+    • tmux/soop (3 windows)
+
+  등록된 계정:
+  [1] ● work @Team [Max5] work@company.com
+  [2]   personal [Pro] me@gmail.com
+
+  [Enter] 새 세션 / [c] continue / [r] resume / [s] 계정 전환
+```
+
+## 다중 맥 동기화 (Telegram)
+
+텔레그램을 통해 여러 맥 간 계정 데이터를 동기화합니다.
+
+```bash
+# Mac A에서
+/account:push          # → 텔레그램으로 전송
+
+# Mac B에서
+/account:pull          # ← 텔레그램에서 가져오기
+```
+
+필요 설정: `~/.claude/hooks/telegram-config.json` (bot_token, chat_id)
+
 ## 주요 기능
 
 - **자동 토큰 갱신**
@@ -68,6 +109,8 @@ flowchart LR
   - 메시지 입력 시: 만료 임박(1시간 이내) 토큰 갱신
 - **사용량 모니터링** - 현재 세션 / 주간 사용량 시각화
 - **Plan 자동 감지** - Free / Pro / Team / Max5 / Max20
+- **다중 맥 동기화** - 텔레그램 기반 push/pull
+- **대화형 런처** - 계정 선택 + 세션 관리
 
 ## 요구사항
 

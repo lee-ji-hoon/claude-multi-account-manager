@@ -11,6 +11,9 @@ from .token_cmd import cmd_check, cmd_refresh_all, cmd_refresh_expiring
 from .misc_cmd import cmd_current, cmd_rename, cmd_set_plan, cmd_setup_hook, cmd_update, cmd_version, cmd_help
 from .import_cmd import cmd_import
 from .export_cmd import cmd_export_for_import
+from .push_cmd import cmd_push
+from .pull_cmd import cmd_pull
+from .launch_cmd import cmd_launch
 from .logs_cmd import cmd_logs
 
 
@@ -33,6 +36,14 @@ def main():
         cmd_import(json_data)
     elif args[0] == "export":
         cmd_export_for_import()
+    elif args[0] == "push":
+        cmd_push()
+    elif args[0] == "pull":
+        source = " ".join(args[1:]) if len(args) > 1 else None
+        cmd_pull(source)
+    elif args[0] == "launch":
+        extra = args[1:] if len(args) > 1 else None
+        cmd_launch(extra)
     elif args[0] == "switch":
         account_id = args[1] if len(args) > 1 else None
         cmd_switch(account_id)
@@ -93,6 +104,9 @@ __all__ = [
     "cmd_remove",
     "cmd_import",
     "cmd_export_for_import",
+    "cmd_push",
+    "cmd_pull",
+    "cmd_launch",
     "cmd_logs",
     "cmd_check",
     "cmd_refresh_all",

@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""
+Claude Code Launcher - 계정 선택 + 세션 관리
+
+터미널에서 직접 실행:
+  claude-launch      # 대화형 런처
+  claude-launch -c   # 바로 continue
+  cl                 # alias
+"""
+import sys
+import os
+
+# 패키지 경로 추가
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+sys.path.insert(0, parent_dir)
+
+from claude_account_manager.commands.launch_cmd import cmd_launch
+
+
+def main():
+    # -c, -r 등 바로 claude에 전달할 옵션이 있으면 launcher 건너뛰기
+    args = sys.argv[1:]
+    if args and args[0] in ('-c', '--continue', '-r', '--resume'):
+        from claude_account_manager.commands.launch_cmd import _exec_claude
+        _exec_claude(args)
+        return
+
+    cmd_launch(args)
+
+
+if __name__ == "__main__":
+    main()

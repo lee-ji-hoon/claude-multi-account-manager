@@ -91,6 +91,7 @@ echo -e "  ${CYAN}[4/5]${NC} 터미널 alias 설정..."
 
 ALIAS_LINE="alias account-switch='python3 \"$PLUGIN_DIR/account_manager.py\" switch'"
 ALIAS_LIST="alias account-list='python3 \"$PLUGIN_DIR/account_manager.py\" list'"
+ALIAS_LAUNCH="alias cl='python3 \"$PLUGIN_DIR/bin/claude-launch\"'"
 
 # 사용자 shell 확인
 SHELL_RC=""
@@ -108,6 +109,7 @@ if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
         echo "# Claude Account Manager - 토큰 소진 시 터미널에서 계정 전환" >> "$SHELL_RC"
         echo "$ALIAS_LINE" >> "$SHELL_RC"
         echo "$ALIAS_LIST" >> "$SHELL_RC"
+        echo "$ALIAS_LAUNCH" >> "$SHELL_RC"
         ALIAS_ADDED=true
         echo -e "    ${GREEN}✓${NC} $SHELL_RC에 alias 추가됨"
     else
@@ -140,6 +142,10 @@ echo -e "  ${CYAN}/account:list${NC}         계정 목록 + 사용량"
 echo -e "  ${CYAN}/account:add 이름${NC}     현재 계정 저장"
 echo -e "  ${CYAN}/account:switch${NC}       계정 전환"
 echo -e "  ${CYAN}/account:check${NC}        토큰 상태 확인"
+echo ""
+echo -e "${DIM}  ─────────────────────────────────────${NC}"
+echo -e "  ${BOLD}🚀 빠른 시작:${NC}"
+echo -e "  ${CYAN}cl${NC}                   런처 (계정 선택 + 세션 관리)"
 echo ""
 echo -e "${DIM}  ─────────────────────────────────────${NC}"
 echo -e "  ${BOLD}🚨 토큰 소진 시 (Claude가 응답 안 할 때):${NC}"
