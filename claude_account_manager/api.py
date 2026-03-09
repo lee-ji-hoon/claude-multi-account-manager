@@ -124,6 +124,41 @@ def _parse_usage_data(data):
     return result
 
 
+def _parse_retry_response(api_data, plan_name):
+    """429 재시도 후 API 응답 파싱"""
+    result = {
+        "planName": plan_name,
+        "fiveHour": None,
+        "sevenDay": None,
+        "fiveHourResetAt": None,
+        "sevenDayResetAt": None,
+        "tokenStatus": TokenStatus.VALID,
+    }
+    if api_data.get("five_hour"):
+        util = api_data["five_hour"].get("utilization")
+        if util is not None:
+            result["fiveHour"] = max(0, min(100, round(util)))
+        if api_data["five_hour"].get("resets_at"):
+            try:
+                result["fiveHourResetAt"] = datetime.fromisoformat(
+                    api_data["five_hour"]["resets_at"].replace("Z", "+00:00")
+                )
+            except Exception:
+                pass
+    if api_data.get("seven_day"):
+        util = api_data["seven_day"].get("utilization")
+        if util is not None:
+            result["sevenDay"] = max(0, min(100, round(util)))
+        if api_data["seven_day"].get("resets_at"):
+            try:
+                result["sevenDayResetAt"] = datetime.fromisoformat(
+                    api_data["seven_day"]["resets_at"].replace("Z", "+00:00")
+                )
+            except Exception:
+                pass
+    return result
+
+
 def _fetch_usage_from_api(credential=None, include_token_status=False, credential_file=None):
     """
     Anthropic API에서 직접 사용량 가져오기
@@ -179,7 +214,7 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "anthropic-beta": "oauth-2025-04-20",
-                "User-Agent": "claude-account-manager/1.0",
+                "User-Agent": "claude-account-manager/2.1.4",
             },
         )
 
@@ -241,6 +276,23 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
         elif e.code == 403:
             if include_token_status:
                 return None, TokenStatus.INVALID
+            return None
+        elif e.code == 429:
+            # Rate limited - 잠시 후 재시도
+            import time
+            time.sleep(1)
+            try:
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    if response.status == 200:
+                        api_data = json.loads(response.read().decode())
+                        result = _parse_retry_response(api_data, plan_name)
+                        if include_token_status:
+                            return result, TokenStatus.VALID
+                        return result
+            except Exception:
+                pass
+            if include_token_status:
+                return None, TokenStatus.VALID  # 토큰은 유효하지만 사용량을 못 가져옴
             return None
         else:
             if include_token_status:

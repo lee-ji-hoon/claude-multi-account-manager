@@ -41,5 +41,8 @@ Thumbs.db
 .omc/
 *.log
 
-# Claude Code user config
-.claude/
+# Claude Code
+.claude/*
+!.claude/CLAUDE.md
+!.claude/skills/
+.claude-state/
