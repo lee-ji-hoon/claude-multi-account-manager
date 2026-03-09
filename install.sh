@@ -16,7 +16,7 @@ DIM='\033[2m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PLUGIN_VERSION="1.0.0"
+PLUGIN_VERSION="2.1.4"
 PLUGIN_NAME="account"
 PLUGIN_DIR="$HOME/.claude/plugins/cache/local/$PLUGIN_NAME/$PLUGIN_VERSION"
 ACCOUNTS_DIR="$HOME/.claude/accounts"
@@ -45,7 +45,11 @@ cp -r "$SCRIPT_DIR/.claude-plugin" "$PLUGIN_DIR/"
 cp -r "$SCRIPT_DIR/commands" "$PLUGIN_DIR/"
 cp -r "$SCRIPT_DIR/hooks" "$PLUGIN_DIR/"
 cp -r "$SCRIPT_DIR/hooks-handlers" "$PLUGIN_DIR/"
+cp -r "$SCRIPT_DIR/claude_account_manager" "$PLUGIN_DIR/"
 cp "$SCRIPT_DIR/account_manager.py" "$PLUGIN_DIR/"
+
+# __pycache__ 제외하고 정리
+find "$PLUGIN_DIR/claude_account_manager" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
 # 실행 권한 설정
 chmod +x "$PLUGIN_DIR/hooks-handlers/session-start.sh"
@@ -89,7 +93,8 @@ EOF
 # 4. 터미널 alias 설정
 echo -e "  ${CYAN}[4/5]${NC} 터미널 alias 설정..."
 
-ALIAS_LINE="alias account-switch='python3 \"$PLUGIN_DIR/account_manager.py\" switch'"
+ALIAS_MAIN="alias account='python3 \"$PLUGIN_DIR/account_manager.py\"'"
+ALIAS_SWITCH="alias account-switch='python3 \"$PLUGIN_DIR/account_manager.py\" switch'"
 ALIAS_LIST="alias account-list='python3 \"$PLUGIN_DIR/account_manager.py\" list'"
 ALIAS_LAUNCH="alias cl='python3 \"$PLUGIN_DIR/bin/claude-launch\"'"
 
@@ -103,11 +108,19 @@ fi
 
 ALIAS_ADDED=false
 if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
-    # 이미 있는지 확인
-    if ! grep -q "account-switch" "$SHELL_RC" 2>/dev/null; then
+    # 이전 alias 정리 (account-switch만 있던 경우)
+    if grep -q "Claude Account Manager" "$SHELL_RC" 2>/dev/null && ! grep -q "alias account=" "$SHELL_RC" 2>/dev/null; then
+        # 기존 블록 제거 후 새로 추가
+        sed -i '' '/# Claude Account Manager/,/^$/d' "$SHELL_RC" 2>/dev/null || true
+        sed -i '' '/account-switch/d' "$SHELL_RC" 2>/dev/null || true
+        sed -i '' '/account-list/d' "$SHELL_RC" 2>/dev/null || true
+    fi
+
+    if ! grep -q "alias account=" "$SHELL_RC" 2>/dev/null; then
         echo "" >> "$SHELL_RC"
-        echo "# Claude Account Manager - 토큰 소진 시 터미널에서 계정 전환" >> "$SHELL_RC"
-        echo "$ALIAS_LINE" >> "$SHELL_RC"
+        echo "# Claude Account Manager - 터미널에서 계정 관리" >> "$SHELL_RC"
+        echo "$ALIAS_MAIN" >> "$SHELL_RC"
+        echo "$ALIAS_SWITCH" >> "$SHELL_RC"
         echo "$ALIAS_LIST" >> "$SHELL_RC"
         echo "$ALIAS_LAUNCH" >> "$SHELL_RC"
         ALIAS_ADDED=true
@@ -117,7 +130,7 @@ if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
     fi
 else
     echo -e "    ${YELLOW}!${NC} shell 설정 파일을 찾을 수 없습니다"
-    echo -e "    ${DIM}수동으로 추가하세요: $ALIAS_LINE${NC}"
+    echo -e "    ${DIM}수동으로 추가하세요: $ALIAS_MAIN${NC}"
 fi
 
 # 5. 완료

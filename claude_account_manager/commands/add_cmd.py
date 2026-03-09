@@ -205,6 +205,7 @@ def cmd_auto_add():
     - 중복 시 조용히 스킵 (exit 0)
     - Plan 자동 감지 (credential에서)
     - 이름 자동 생성 (displayName > email)
+    - 조직 컨텍스트 자동 감지 (같은 email이라도 조직이 다르면 별도 계정)
 
     Returns:
         bool: True=등록됨, False=스킵/실패
@@ -225,7 +226,7 @@ def cmd_auto_add():
     if is_account_duplicate(email, org_uuid):
         return False  # 이미 등록됨
 
-    # 3. credential에서 Plan 감지
+    # 4. credential에서 Plan 감지
     credential = get_keychain_credential()
     if not credential:
         print("[auto-add] credential을 읽을 수 없습니다.", file=sys.stderr)
@@ -236,25 +237,25 @@ def cmd_auto_add():
 
     plan = detect_plan_from_credential(credential)
 
-    # 4. 이름 자동 생성
+    # 5. 이름 자동 생성
     name = generate_account_name(current, email)
 
     # 5. ID 생성 (org 포함)
     account_id = generate_account_id(email, org_name, org_uuid)
 
-    # 6. 프로필 저장
+    # 7. 프로필 저장
     profile_file = f"profile_{account_id}.json"
     profile_path = ACCOUNTS_DIR / profile_file
     profile_path.write_text(json.dumps(current, indent=2, ensure_ascii=False))
     os.chmod(profile_path, 0o600)
 
-    # 7. credential 저장
+    # 8. credential 저장
     credential_file = f"credential_{account_id}.json"
     credential_path = ACCOUNTS_DIR / credential_file
     credential_path.write_text(json.dumps(credential, indent=2, ensure_ascii=False))
     os.chmod(credential_path, 0o600)
 
-    # 8. index 업데이트
+    # 9. index 업데이트
     index = load_index()
     account_entry = {
         "id": account_id,

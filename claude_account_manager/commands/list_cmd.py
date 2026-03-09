@@ -81,11 +81,11 @@ def cmd_list():
                             pass
                 return (acc["id"], None, TokenStatus.NO_TOKEN, None)
 
-        # 병렬 요청
+        # 병렬 요청 (max_workers=2로 rate limit 방지)
         usage_map = {}
         token_status_map = {}
         expires_at_map = {}
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {executor.submit(fetch_account_usage, acc): acc for acc in index["accounts"]}
             for future in as_completed(futures):
                 try:
@@ -162,6 +162,18 @@ def cmd_list():
                 print(f"      {c(Colors.DIM, '(credential 없음)')}")
             elif token_status == TokenStatus.ERROR:
                 print(f"      {c(Colors.YELLOW, '⚠ 연결 오류')} - {c(Colors.DIM, '네트워크 확인 필요')}")
+            elif token_status == TokenStatus.VALID and not real_usage:
+                # 토큰은 유효하지만 사용량 조회 실패 (429 rate limit 등)
+                if expires_at:
+                    now_local = datetime.now()
+                    remaining = expires_at - now_local
+                    if remaining.total_seconds() > 0:
+                        hours = int(remaining.total_seconds() // 3600)
+                        minutes = int((remaining.total_seconds() % 3600) // 60)
+                        expire_str = f"{hours}h {minutes}m" if hours >= 1 else f"{minutes}m"
+                        print(f"      {c(Colors.DIM, '토큰')} {c(Colors.DIM, f'🔑 {expire_str} 후 만료')}")
+                else:
+                    print(f"      {c(Colors.DIM, '(사용량 조회 일시 실패)')}")
             elif real_usage:
                 # 실제 API 데이터 사용
                 now = datetime.now(real_usage["sevenDayResetAt"].tzinfo) if real_usage["sevenDayResetAt"] else datetime.now()
