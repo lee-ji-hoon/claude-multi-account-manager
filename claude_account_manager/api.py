@@ -278,19 +278,28 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
                 return None, TokenStatus.INVALID
             return None
         elif e.code == 429:
-            # Rate limited - 잠시 후 재시도
+            # Rate limited - 점진적 재시도 (2초, 4초)
             import time
-            time.sleep(1)
-            try:
-                with urllib.request.urlopen(req, timeout=5) as response:
-                    if response.status == 200:
-                        api_data = json.loads(response.read().decode())
-                        result = _parse_retry_response(api_data, plan_name)
-                        if include_token_status:
-                            return result, TokenStatus.VALID
-                        return result
-            except Exception:
-                pass
+            for delay in (2, 4):
+                time.sleep(delay)
+                try:
+                    retry_req = urllib.request.Request(
+                        "https://api.anthropic.com/api/oauth/usage",
+                        headers={
+                            "Authorization": f"Bearer {access_token}",
+                            "anthropic-beta": "oauth-2025-04-20",
+                            "User-Agent": "claude-account-manager/2.2.1",
+                        },
+                    )
+                    with urllib.request.urlopen(retry_req, timeout=5) as response:
+                        if response.status == 200:
+                            api_data = json.loads(response.read().decode())
+                            result = _parse_retry_response(api_data, plan_name)
+                            if include_token_status:
+                                return result, TokenStatus.VALID
+                            return result
+                except Exception:
+                    continue
             if include_token_status:
                 return None, TokenStatus.VALID  # 토큰은 유효하지만 사용량을 못 가져옴
             return None

@@ -81,20 +81,41 @@ def cmd_list():
                             pass
                 return (acc["id"], None, TokenStatus.NO_TOKEN, None)
 
-        # 병렬 요청 (max_workers=2로 rate limit 방지)
+        # 현재 계정 먼저 가져오고 (rate limit 방지), 나머지 병렬 처리
         usage_map = {}
         token_status_map = {}
         expires_at_map = {}
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = {executor.submit(fetch_account_usage, acc): acc for acc in index["accounts"]}
-            for future in as_completed(futures):
-                try:
-                    acc_id, usage, token_status, expires_at = future.result()
-                    usage_map[acc_id] = usage
-                    token_status_map[acc_id] = token_status
-                    expires_at_map[acc_id] = expires_at
-                except Exception:
-                    pass
+
+        current_acc = None
+        other_accs = []
+        for acc in index["accounts"]:
+            if _is_current(acc):
+                current_acc = acc
+            else:
+                other_accs.append(acc)
+
+        # 1) 현재 계정 먼저 (경합 없이)
+        if current_acc:
+            try:
+                acc_id, usage, token_status, expires_at = fetch_account_usage(current_acc)
+                usage_map[acc_id] = usage
+                token_status_map[acc_id] = token_status
+                expires_at_map[acc_id] = expires_at
+            except Exception:
+                pass
+
+        # 2) 나머지 계정 병렬 (max_workers=2)
+        if other_accs:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = {executor.submit(fetch_account_usage, acc): acc for acc in other_accs}
+                for future in as_completed(futures):
+                    try:
+                        acc_id, usage, token_status, expires_at = future.result()
+                        usage_map[acc_id] = usage
+                        token_status_map[acc_id] = token_status
+                        expires_at_map[acc_id] = expires_at
+                    except Exception:
+                        pass
 
         # 결과 출력
         for i, acc in enumerate(index["accounts"], 1):
