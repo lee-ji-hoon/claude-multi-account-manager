@@ -28,6 +28,8 @@ INDEX_FILE = ACCOUNTS_DIR / "index.json"
 STATS_CACHE = CLAUDE_DIR / "stats-cache.json"
 USAGE_CACHE = CLAUDE_DIR / "plugins" / "claude-hud" / ".usage-cache.json"
 VERSION_CACHE = ACCOUNTS_DIR / ".version-cache.json"
+ACCOUNT_USAGE_CACHE = ACCOUNTS_DIR / ".usage-cache.json"  # 계정별 사용량 캐시
+USAGE_CACHE_TTL = 300  # 캐시 유효기간 (초) - 5분
 
 # Plan별 대략적인 일일 토큰 한도 (참고용)
 PLAN_LIMITS_DAILY = {

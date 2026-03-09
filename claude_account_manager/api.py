@@ -7,7 +7,9 @@ import urllib.request
 import urllib.error
 from datetime import datetime, date, timedelta
 
-from .config import STATS_CACHE, CLAUDE_DIR
+import time as _time
+
+from .config import STATS_CACHE, CLAUDE_DIR, ACCOUNT_USAGE_CACHE, USAGE_CACHE_TTL
 from .storage import load_claude_json
 from .keychain import get_keychain_credential
 from .token import TokenStatus, refresh_access_token
@@ -96,6 +98,62 @@ def get_real_usage():
     return _fetch_usage_from_api()
 
 
+def _load_usage_cache():
+    """계정별 사용량 캐시 로드"""
+    try:
+        if ACCOUNT_USAGE_CACHE.exists():
+            return json.loads(ACCOUNT_USAGE_CACHE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _save_usage_cache(cache):
+    """계정별 사용량 캐시 저장"""
+    try:
+        ACCOUNT_USAGE_CACHE.write_text(json.dumps(cache))
+    except Exception:
+        pass
+
+
+def _get_cached_usage(account_key):
+    """캐시에서 사용량 조회 (TTL 초과 시 None)"""
+    cache = _load_usage_cache()
+    entry = cache.get(account_key)
+    if not entry:
+        return None
+    cached_at = entry.get("cachedAt", 0)
+    if _time.time() - cached_at > USAGE_CACHE_TTL:
+        return None
+    # datetime 복원
+    result = dict(entry.get("data", {}))
+    for key in ("fiveHourResetAt", "sevenDayResetAt"):
+        if result.get(key):
+            try:
+                result[key] = datetime.fromisoformat(result[key])
+            except Exception:
+                result[key] = None
+    return result
+
+
+def _set_cached_usage(account_key, data):
+    """사용량을 캐시에 저장"""
+    if not data:
+        return
+    cache = _load_usage_cache()
+    # datetime 직렬화
+    serializable = dict(data)
+    for key in ("fiveHourResetAt", "sevenDayResetAt"):
+        if serializable.get(key):
+            serializable[key] = serializable[key].isoformat()
+    serializable.pop("tokenStatus", None)
+    cache[account_key] = {
+        "data": serializable,
+        "cachedAt": _time.time(),
+    }
+    _save_usage_cache(cache)
+
+
 def _parse_usage_data(data):
     """사용량 데이터 파싱"""
     result = {
@@ -161,7 +219,7 @@ def _parse_retry_response(api_data, plan_name):
 
 def _fetch_usage_from_api(credential=None, include_token_status=False, credential_file=None):
     """
-    Anthropic API에서 직접 사용량 가져오기
+    Anthropic API에서 직접 사용량 가져오기 (429 시 캐시 활용)
 
     Args:
         credential: credential 딕셔너리 (None이면 Keychain에서 읽음)
@@ -184,26 +242,25 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
             return None, TokenStatus.NO_TOKEN
         return None
 
+    # 캐시 키: 토큰 앞 20자 해시 (계정 식별용)
+    cache_key = access_token[:20]
+
     # Plan 이름 결정
     sub_lower = subscription_type.lower()
     if "max" in sub_lower:
-        # Max5/Max20 구분: subscription_type에서 숫자 추출
         match = re.search(r'max[_\s-]?(\d+)', sub_lower)
         if match:
             num = int(match.group(1))
-            if num >= 20:
-                plan_name = "Max20"
-            else:
-                plan_name = "Max5"
+            plan_name = "Max20" if num >= 20 else "Max5"
         else:
-            plan_name = "Max5"  # 기본값
+            plan_name = "Max5"
     elif "pro" in sub_lower:
         plan_name = "Pro"
     elif "team" in sub_lower:
         plan_name = "Team"
     elif not subscription_type or "api" in sub_lower:
         if include_token_status:
-            return None, TokenStatus.VALID  # API 사용자는 토큰은 유효하지만 사용량 없음
+            return None, TokenStatus.VALID
         return None
     else:
         plan_name = subscription_type.capitalize()
@@ -214,7 +271,7 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "anthropic-beta": "oauth-2025-04-20",
-                "User-Agent": "claude-account-manager/2.1.4",
+                "User-Agent": f"claude-account-manager/{__import__('claude_account_manager.config', fromlist=['__version__']).__version__}",
             },
         )
 
@@ -225,39 +282,10 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
                 return None
             api_data = json.loads(response.read().decode())
 
-        # API 응답 파싱
-        result = {
-            "planName": plan_name,
-            "fiveHour": None,
-            "sevenDay": None,
-            "fiveHourResetAt": None,
-            "sevenDayResetAt": None,
-            "tokenStatus": TokenStatus.VALID,
-        }
+        result = _parse_retry_response(api_data, plan_name)
 
-        if api_data.get("five_hour"):
-            util = api_data["five_hour"].get("utilization")
-            if util is not None:
-                result["fiveHour"] = max(0, min(100, round(util)))
-            if api_data["five_hour"].get("resets_at"):
-                try:
-                    result["fiveHourResetAt"] = datetime.fromisoformat(
-                        api_data["five_hour"]["resets_at"].replace("Z", "+00:00")
-                    )
-                except Exception:
-                    pass
-
-        if api_data.get("seven_day"):
-            util = api_data["seven_day"].get("utilization")
-            if util is not None:
-                result["sevenDay"] = max(0, min(100, round(util)))
-            if api_data["seven_day"].get("resets_at"):
-                try:
-                    result["sevenDayResetAt"] = datetime.fromisoformat(
-                        api_data["seven_day"]["resets_at"].replace("Z", "+00:00")
-                    )
-                except Exception:
-                    pass
+        # 성공 시 캐시에 저장
+        _set_cached_usage(cache_key, result)
 
         if include_token_status:
             return result, TokenStatus.VALID
@@ -265,10 +293,8 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
 
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            # 토큰 만료 - 자동 갱신 시도 (credential_file 전달하여 올바른 위치에 저장)
             new_credential, refresh_error = refresh_access_token(credential, credential_file=credential_file)
             if new_credential:
-                # 갱신 성공 - 재시도 (credential_file=None으로 재귀 방지)
                 return _fetch_usage_from_api(new_credential, include_token_status, credential_file=None)
             if include_token_status:
                 return None, TokenStatus.EXPIRED
@@ -278,37 +304,42 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
                 return None, TokenStatus.INVALID
             return None
         elif e.code == 429:
-            # Rate limited - 점진적 재시도 (2초, 4초)
-            import time
-            for delay in (2, 4):
-                time.sleep(delay)
-                try:
-                    retry_req = urllib.request.Request(
-                        "https://api.anthropic.com/api/oauth/usage",
-                        headers={
-                            "Authorization": f"Bearer {access_token}",
-                            "anthropic-beta": "oauth-2025-04-20",
-                            "User-Agent": "claude-account-manager/2.2.1",
-                        },
-                    )
-                    with urllib.request.urlopen(retry_req, timeout=5) as response:
-                        if response.status == 200:
-                            api_data = json.loads(response.read().decode())
-                            result = _parse_retry_response(api_data, plan_name)
-                            if include_token_status:
-                                return result, TokenStatus.VALID
-                            return result
-                except Exception:
-                    continue
+            # Rate limited → 캐시에서 반환 (재시도 없이 즉시)
+            cached = _get_cached_usage(cache_key)
+            if cached:
+                if include_token_status:
+                    return cached, TokenStatus.VALID
+                return cached
+            # 캐시 없으면 1회 재시도 (3초 후)
+            _time.sleep(3)
+            try:
+                retry_req = urllib.request.Request(
+                    "https://api.anthropic.com/api/oauth/usage",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "anthropic-beta": "oauth-2025-04-20",
+                        "User-Agent": "claude-account-manager/2.2.2",
+                    },
+                )
+                with urllib.request.urlopen(retry_req, timeout=5) as response:
+                    if response.status == 200:
+                        api_data = json.loads(response.read().decode())
+                        result = _parse_retry_response(api_data, plan_name)
+                        _set_cached_usage(cache_key, result)
+                        if include_token_status:
+                            return result, TokenStatus.VALID
+                        return result
+            except Exception:
+                pass
             if include_token_status:
-                return None, TokenStatus.VALID  # 토큰은 유효하지만 사용량을 못 가져옴
+                return None, TokenStatus.VALID
             return None
         else:
             if include_token_status:
                 return None, TokenStatus.ERROR
             return None
 
-    except (urllib.error.URLError, json.JSONDecodeError, KeyError) as e:
+    except (urllib.error.URLError, json.JSONDecodeError, KeyError):
         if include_token_status:
             return None, TokenStatus.ERROR
         return None

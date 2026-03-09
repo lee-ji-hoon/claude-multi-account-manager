@@ -1,7 +1,6 @@
 """
 cmd_list: Display registered accounts with usage visualization
 """
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from datetime import datetime
 
@@ -104,18 +103,19 @@ def cmd_list():
             except Exception:
                 pass
 
-        # 2) 나머지 계정 병렬 (max_workers=2)
+        # 2) 나머지 계정 순차 처리 (429 rate limit 방지를 위해 1초 딜레이)
         if other_accs:
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = {executor.submit(fetch_account_usage, acc): acc for acc in other_accs}
-                for future in as_completed(futures):
-                    try:
-                        acc_id, usage, token_status, expires_at = future.result()
-                        usage_map[acc_id] = usage
-                        token_status_map[acc_id] = token_status
-                        expires_at_map[acc_id] = expires_at
-                    except Exception:
-                        pass
+            import time
+            time.sleep(1)  # 현재 계정 호출 후 rate limit 회피
+            for acc in other_accs:
+                try:
+                    acc_id, usage, token_status, expires_at = fetch_account_usage(acc)
+                    usage_map[acc_id] = usage
+                    token_status_map[acc_id] = token_status
+                    expires_at_map[acc_id] = expires_at
+                except Exception:
+                    pass
+                time.sleep(1)  # 계정 간 딜레이
 
         # 결과 출력
         for i, acc in enumerate(index["accounts"], 1):
