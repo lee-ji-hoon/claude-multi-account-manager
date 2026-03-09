@@ -1,71 +1,71 @@
 ---
-description: 새 버전 릴리즈 (버전 업데이트 -> 커밋 -> 태그 -> main 머지 -> 푸시). "릴리즈", "배포", "release" 요청 시 사용.
-argument-hint: [버전] (예: 2.2.0)
+description: Release a new version (version update -> commit -> tag -> merge to main -> push). Triggered by "release", "deploy", "publish release".
+argument-hint: [version] (e.g. 2.2.0)
 allowed-tools: [Bash, Read, Edit, AskUserQuestion]
 ---
 
 # Release
 
-새 버전을 릴리즈합니다.
+Releases a new version.
 
 ## Required Rules
 
-1. **버전 형식**: semver 준수 (MAJOR.MINOR.PATCH)
-2. **브랜치 전략**: develop -> main 머지 후 태그
-3. **마켓플레이스 캐시**: 반드시 업데이트 확인
+1. **Version format**: Must follow semver (MAJOR.MINOR.PATCH)
+2. **Branch strategy**: Merge develop -> main, then tag
+3. **Marketplace cache**: Must verify update
 
 ## Instructions
 
-### 1. 버전 결정
+### 1. Determine Version
 
-버전이 인자로 제공되지 않은 경우:
-- 현재 버전 확인: `cat .claude-plugin/plugin.json | grep version`
-- 캐시된 최신 버전 확인: `ls ~/.claude/plugins/cache/lee-ji-hoon/account/`
-- AskUserQuestion으로 새 버전 입력받기
+If no version is provided as an argument:
+- Check current version: `cat .claude-plugin/plugin.json | grep version`
+- Check latest cached version: `ls ~/.claude/plugins/cache/lee-ji-hoon/account/`
+- Use AskUserQuestion to get the new version
 
-**중요**: 새 버전은 캐시된 모든 버전보다 높아야 함 (semver 비교)
+**Important**: The new version must be higher than all cached versions (semver comparison)
 
-### 2. plugin.json 버전 업데이트
+### 2. Update plugin.json Version
 
-Edit 도구로 `.claude-plugin/plugin.json`의 version 필드 수정
+Use the Edit tool to modify the version field in `.claude-plugin/plugin.json`
 
-### 3. 커밋 및 태그 생성
+### 3. Commit and Create Tag
 
 ```bash
 git add -A
-git commit -m "release: v{버전}
+git commit -m "release: v{version}
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
-git tag -a v{버전} -m "v{버전}"
+git tag -a v{version} -m "v{version}"
 git push origin develop
 ```
 
-### 4. main 브랜치 머지 (필수!)
+### 4. Merge to main Branch (Required!)
 
 ```bash
 git checkout main
 git merge develop
 git push origin main
-git push origin v{버전}
+git push origin v{version}
 git checkout develop
 ```
 
-### 5. 마켓플레이스 캐시 업데이트 확인
+### 5. Verify Marketplace Cache Update
 
 ```bash
 cd ~/.claude/plugins/marketplaces/lee-ji-hoon && git pull origin main
 ```
 
-### 6. 완료 안내
+### 6. Completion Notice
 
-- Claude Code 재시작 필요
-- `/plugin update account@lee-ji-hoon` 실행
+- Claude Code restart required
+- Run `/plugin update account@lee-ji-hoon`
 
 ## Checklist
 
-- [ ] plugin.json 버전 업데이트
-- [ ] develop 브랜치에 커밋
-- [ ] 태그 생성 (v{버전})
-- [ ] **main 브랜치로 머지** (중요!)
-- [ ] main 푸시 + 태그 푸시
-- [ ] 마켓플레이스 캐시 업데이트 확인
+- [ ] Update plugin.json version
+- [ ] Commit on develop branch
+- [ ] Create tag (v{version})
+- [ ] **Merge to main branch** (important!)
+- [ ] Push main + push tag
+- [ ] Verify marketplace cache update
