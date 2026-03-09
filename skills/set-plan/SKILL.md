@@ -1,39 +1,39 @@
 ---
-description: 계정의 Plan 수동 설정. "Plan 변경", "플랜 설정", "set plan" 요청 시 사용.
-argument-hint: [계정ID] [Plan]
+description: Manually set an account's Plan. Triggered by "set plan", "change plan", "update plan".
+argument-hint: [account ID] [Plan]
 allowed-tools: [Bash, AskUserQuestion]
 ---
 
 # Account Set Plan
 
-계정의 Plan을 수동으로 변경합니다.
+Manually changes an account's Plan.
 
 ## Instructions
 
-1. 계정 목록을 확인하고 **결과를 사용자에게 그대로 출력**하세요:
+1. Check the account list and **display the result to the user as-is**:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" list
 ```
 
-2. 계정ID가 인자로 제공되지 않은 경우:
-   - AskUserQuestion으로 계정을 선택하도록 질문하세요
+2. If no account ID is provided as an argument:
+   - Use AskUserQuestion to ask the user to select an account
 
-3. Plan이 인자로 제공되지 않은 경우:
-   - AskUserQuestion으로 Plan을 선택하도록 질문하세요
-   - 선택지: Free, Pro, Team, Max5, Max20
+3. If no Plan is provided as an argument:
+   - Use AskUserQuestion to ask the user to select a Plan
+   - Options: Free, Pro, Team, Max5, Max20
 
-4. Plan 설정 실행하고 **결과를 사용자에게 그대로 출력**하세요:
+4. Execute the Plan change and **display the result to the user as-is**:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" set-plan $ARGUMENTS
 ```
 
-**중요**: 모든 명령 실행 후 출력 결과를 코드 블록 없이 그대로 사용자에게 보여주세요.
+**Important**: After every command execution, show the output to the user as-is without code blocks.
 
 ## Valid Plans
 
-- Free, Pro, Team, Max5 (5 프로젝트), Max20 (20 프로젝트)
+- Free, Pro, Team, Max5 (5 projects), Max20 (20 projects)
 
 ## Notes
 
-- 일반적으로 Plan은 자동 감지됩니다
-- 자동 감지가 잘못된 경우에만 수동 설정하세요
+- Normally, Plan is auto-detected
+- Only use manual setting if auto-detection is incorrect

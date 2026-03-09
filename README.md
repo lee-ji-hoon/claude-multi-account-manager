@@ -1,151 +1,153 @@
 # Claude Code Multi-Account Manager
 
-Claude Code 다중 계정 관리 플러그인. 여러 계정을 **로그아웃 없이** 전환하고, 사용량을 한눈에 모니터링합니다.
+[한국어](README.ko.md)
 
-## 설치
+A Claude Code plugin for managing multiple accounts. Switch between accounts without logging out and monitor usage at a glance.
+
+## Installation
 
 ```bash
-# 마켓플레이스 등록 (최초 1회)
+# Register marketplace (once)
 claude plugin marketplace add https://github.com/lee-ji-hoon/claude-multi-account-manager.git
 
-# 플러그인 설치
+# Install plugin
 claude plugin install account@lee-ji-hoon
 
-# Claude Code 재시작
+# Restart Claude Code
 ```
 
-설치 후 세션을 시작하면 현재 계정이 자동으로 등록되고, 터미널 alias(`account`, `account-list`, `account-switch`)가 설정됩니다.
+After installation, your current account is automatically registered on session start, and terminal aliases (`account`, `account-list`, `account-switch`) are set up.
 
-## 주요 기능
+## Features
 
-- **계정 전환** — 로그아웃 없이 저장된 계정으로 즉시 전환
-- **자동 토큰 갱신** — 세션 시작 시 모든 계정, 메시지 입력 시 만료 임박 토큰 갱신
-- **사용량 모니터링** — 현재 세션(5h) / 주간(7d) 사용량 프로그레스 바
-- **Plan 자동 감지** — Free / Pro / Team / Max5 / Max20
-- **Organization 지원** — 같은 이메일이라도 개인/조직 계정 별도 관리
+- **Account Switching** — Switch to saved accounts instantly without logging out
+- **Auto Token Refresh** — Refreshes all tokens on session start; refreshes expiring tokens on each message
+- **Usage Monitoring** — Current session (5h) / weekly (7d) usage with progress bars
+- **Auto Plan Detection** — Free / Pro / Team / Max5 / Max20
+- **Organization Support** — Manages personal and org accounts separately, even with the same email
 
-## 명령어
+## Commands
 
-| 명령어 | 설명 |
-|--------|------|
-| `/account:list` | 계정 목록 + 실시간 사용량 |
-| `/account:add [이름]` | 현재 계정 저장 |
-| `/account:switch [id]` | 계정 전환 |
-| `/account:remove [id]` | 계정 삭제 |
-| `/account:check` | 토큰 상태 확인 |
-| `/account:set-plan [id] [plan]` | Plan 수동 설정 |
-| `/account:export` | 계정 정보 JSON 추출 |
-| `/account:import [json]` | 다른 PC에서 계정 가져오기 |
-| `/account:logs` | 토큰 갱신 로그 확인 |
-| `/account:repair` | 설치 문제 진단 및 수리 |
-| `/account:report` | 버그 리포트 GitHub Issue 자동 생성 |
+| Command | Description |
+|---------|-------------|
+| `/account:list` | List accounts + real-time usage |
+| `/account:add [name]` | Save current account |
+| `/account:switch [id]` | Switch account |
+| `/account:remove [id]` | Delete account |
+| `/account:check` | Check token status |
+| `/account:set-plan [id] [plan]` | Set Plan manually |
+| `/account:export` | Export account as JSON |
+| `/account:import [json]` | Import accounts from another machine |
+| `/account:logs` | View token refresh logs |
+| `/account:repair` | Diagnose & fix installation issues |
+| `/account:report` | Auto-create GitHub Issue with diagnostics |
 
-## 사용 예시
+## Example
 
 ```
 /account:list
 
-  Claude 계정 목록
+  Claude Accounts
   ───────────────────────────────────────────────────────
-  [1] ● work @Team [Max5] - 활성
+  [1] ● work @Team [Max5] - active
       work@company.com
-      현재 ██░░░░░░░░░░ 24% | ⏱ 4h 27m
-      주간 ██████░░░░░░ 51% | ⏱ 87h 27m
-      토큰 🔑 6h 15m 후 만료
+      now  ██░░░░░░░░░░ 24% | ⏱ 4h 27m
+      week ██████░░░░░░ 51% | ⏱ 87h 27m
+      token 🔑 6h 15m remaining
 
   [2]   personal [Pro]
       me@gmail.com
-      주간 ███░░░░░░░░░ 30% | ⏱ 120h 10m
-      토큰 🔑 3h 42m 후 만료
+      week ███░░░░░░░░░ 30% | ⏱ 120h 10m
+      token 🔑 3h 42m remaining
   ───────────────────────────────────────────────────────
 ```
 
-## 동작 원리
+## How It Works
 
 ```mermaid
 flowchart LR
     subgraph Hooks
-        A[세션 시작] --> B[계정 자동 등록 + 모든 토큰 갱신]
-        C[메시지 입력] --> D{만료 1시간 이내?}
-        D -->|Yes| E[해당 토큰 갱신]
-        D -->|No| F[스킵]
+        A[Session Start] --> B[Auto-register + Refresh all tokens]
+        C[Message Submit] --> D{Expires within 1h?}
+        D -->|Yes| E[Refresh token]
+        D -->|No| F[Skip]
     end
 
-    subgraph 계정관리
-        G["account:add"] --> H[Keychain에 저장]
-        I["account:switch"] --> J[토큰 교체]
+    subgraph Account Management
+        G["account:add"] --> H[Save to Keychain]
+        I["account:switch"] --> J[Swap token]
     end
 ```
 
-### 데이터 저장 위치
+### Data Storage
 
-| 항목 | 위치 |
-|------|------|
-| 계정 목록 | `~/.claude/accounts/index.json` |
-| OAuth 토큰 | macOS Keychain + `~/.claude/accounts/credential_*.json` |
-| 프로필 | `~/.claude/accounts/profile_*.json` |
-| 갱신 로그 | `~/.claude/accounts/logs/token-refresh.log` |
+| Item | Location |
+|------|----------|
+| Account index | `~/.claude/accounts/index.json` |
+| OAuth tokens | macOS Keychain + `~/.claude/accounts/credential_*.json` |
+| Profiles | `~/.claude/accounts/profile_*.json` |
+| Refresh logs | `~/.claude/accounts/logs/token-refresh.log` |
 
-## 터미널 사용
+## Terminal Usage
 
-설치 후 터미널에서도 직접 사용할 수 있습니다:
+After installation, you can use it directly from the terminal:
 
 ```bash
-account              # 도움말
-account list         # 계정 목록
-account switch       # 대화형 전환
-account-list         # 단축 alias
-account-switch       # 단축 alias
+account              # Help
+account list         # List accounts
+account switch       # Interactive switch
+account-list         # Shortcut alias
+account-switch       # Shortcut alias
 ```
 
-## 다중 PC 동기화 (선택)
+## Multi-Mac Sync (Optional)
 
-Telegram Bot을 통해 여러 Mac 간 계정 데이터를 동기화할 수 있습니다.
+Sync account data across multiple Macs via Telegram Bot.
 
 ```bash
-# Mac A에서 전송
-/account:push
+# On Mac A
+/account:push          # Send to Telegram
 
-# Mac B에서 수신
-/account:pull
+# On Mac B
+/account:pull          # Receive from Telegram
 ```
 
-설정: `~/.claude/hooks/telegram-config.json`에 `bot_token`, `chat_id` 추가 필요.
+Setup: Add `bot_token` and `chat_id` to `~/.claude/hooks/telegram-config.json`.
 
-## 문제 해결
+## Troubleshooting
 
-### `/account:repair` — 자동 진단
+### `/account:repair` — Auto Diagnostics
 
-설치 문제, 토큰 오류, 중복 계정 등을 자동으로 진단하고 수리합니다.
+Automatically diagnoses and fixes installation issues, token errors, and duplicate accounts.
 
-### `/account:report` — 버그 리포트
+### `/account:report` — Bug Report
 
-문제가 해결되지 않으면 `/account:report`로 진단 정보를 수집하여 GitHub Issue를 자동 생성할 수 있습니다.
+If the issue persists, run `/account:report` to collect diagnostics and auto-create a GitHub Issue.
 
-### 수동 확인
+### Manual Checks
 
 ```bash
-# 토큰 상태
+# Token status
 /account:check
 
-# 갱신 로그 확인
+# Refresh logs
 /account:logs
 
-# 로그 파일 직접 확인
+# Log file directly
 cat ~/.claude/accounts/logs/token-refresh.log
 ```
 
-## 요구사항
+## Requirements
 
-- macOS (Keychain 사용)
+- macOS (uses Keychain)
 - Python 3.8+
 - Claude Code CLI
 
-## 기여
+## Contributing
 
-버그 리포트나 기능 제안은 [Issues](https://github.com/lee-ji-hoon/claude-multi-account-manager/issues)에 등록해주세요.
-Claude Code 세션에서 `/account:report`를 실행하면 진단 정보가 포함된 Issue가 자동 생성됩니다.
+Report bugs or suggest features via [Issues](https://github.com/lee-ji-hoon/claude-multi-account-manager/issues).
+Run `/account:report` in a Claude Code session to auto-create an Issue with diagnostic info.
 
-## 라이선스
+## License
 
 MIT

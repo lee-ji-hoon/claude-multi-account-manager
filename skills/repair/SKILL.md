@@ -1,41 +1,41 @@
 ---
-description: 플러그인 설치 문제 진단 및 수리. "수리", "repair", "문제 해결", "설치 확인" 요청 시 사용.
+description: Diagnose and repair plugin installation issues. Triggered by "repair", "fix", "troubleshoot", "check installation".
 allowed-tools: [Bash, Read, Edit]
 ---
 
 # Account Repair
 
-플러그인 설치 상태를 진단하고 문제를 자동으로 수리합니다.
+Diagnoses the plugin installation status and automatically repairs issues.
 
 ## Instructions
 
-아래 체크리스트를 순서대로 실행하세요. 각 단계에서 문제가 발견되면 즉시 수정합니다.
+Execute the checklist below in order. If a problem is found at any step, fix it immediately.
 
-### 1. 계정 디렉토리 확인
+### 1. Check Accounts Directory
 
 ```bash
-echo "=== 1. 계정 디렉토리 ==="
+echo "=== 1. Accounts Directory ==="
 if [ -d "$HOME/.claude/accounts" ]; then
-    echo "OK: accounts 디렉토리 존재"
+    echo "OK: accounts directory exists"
     if [ -f "$HOME/.claude/accounts/index.json" ]; then
-        echo "OK: index.json 존재"
-        python3 -c "import json; d=json.load(open('$HOME/.claude/accounts/index.json')); print(f'   계정 수: {len(d.get(\"accounts\",[]))}개')"
+        echo "OK: index.json exists"
+        python3 -c "import json; d=json.load(open('$HOME/.claude/accounts/index.json')); print(f'   Accounts: {len(d.get(\"accounts\",[]))}')"
     else
-        echo "FAIL: index.json 없음 → 생성"
+        echo "FAIL: index.json missing -> creating"
         echo '{"version": 1, "accounts": [], "activeAccountId": null}' > "$HOME/.claude/accounts/index.json"
     fi
 else
-    echo "FAIL: accounts 디렉토리 없음 → 생성"
+    echo "FAIL: accounts directory missing -> creating"
     mkdir -p "$HOME/.claude/accounts"
     chmod 700 "$HOME/.claude/accounts"
     echo '{"version": 1, "accounts": [], "activeAccountId": null}' > "$HOME/.claude/accounts/index.json"
 fi
 ```
 
-### 2. 플러그인 설치 상태 확인
+### 2. Check Plugin Installation Status
 
 ```bash
-echo "=== 2. 플러그인 설치 상태 ==="
+echo "=== 2. Plugin Installation Status ==="
 
 if [ -f "$HOME/.claude/plugins/installed_plugins.json" ]; then
     python3 -c "
@@ -49,19 +49,19 @@ if account_plugins:
             path = e.get('installPath', '?')
             ver = e.get('version', '?')
             print(f'OK: {name} v{ver}')
-            print(f'   경로: {path}')
+            print(f'   Path: {path}')
 else:
-    print('WARN: account 플러그인 미등록')
+    print('WARN: account plugin not registered')
 "
 else
-    echo "WARN: installed_plugins.json 없음"
+    echo "WARN: installed_plugins.json not found"
 fi
 ```
 
-### 3. 플러그인 파일 무결성
+### 3. Plugin File Integrity
 
 ```bash
-echo "=== 3. 파일 무결성 ==="
+echo "=== 3. File Integrity ==="
 
 INSTALL_PATH=$(python3 -c "
 import json, os
@@ -76,46 +76,46 @@ if os.path.exists(path):
 " 2>/dev/null | head -1)
 
 if [ -z "$INSTALL_PATH" ]; then
-    echo "FAIL: 플러그인 설치 경로를 찾을 수 없음"
-    echo "→ install.sh를 다시 실행하세요"
+    echo "FAIL: Cannot find plugin install path"
+    echo "-> Please re-run install.sh"
 else
     MISSING=0
     for f in account_manager.py .claude-plugin/plugin.json hooks/hooks.json hooks-handlers/session-start.sh; do
         if [ -f "$INSTALL_PATH/$f" ]; then
             echo "OK: $f"
         else
-            echo "FAIL: $f 없음"
+            echo "FAIL: $f missing"
             MISSING=$((MISSING + 1))
         fi
     done
 
     if [ -d "$INSTALL_PATH/claude_account_manager" ]; then
-        echo "OK: claude_account_manager/ 패키지"
+        echo "OK: claude_account_manager/ package"
     else
-        echo "FAIL: claude_account_manager/ 패키지 없음 (치명적)"
-        echo "→ install.sh를 다시 실행하세요"
+        echo "FAIL: claude_account_manager/ package missing (critical)"
+        echo "-> Please re-run install.sh"
         MISSING=$((MISSING + 1))
     fi
 
     if [ -d "$INSTALL_PATH/skills" ]; then
         SKILL_COUNT=$(ls -d "$INSTALL_PATH/skills/"*/ 2>/dev/null | wc -l | tr -d ' ')
-        echo "OK: skills/ ($SKILL_COUNT개 스킬)"
+        echo "OK: skills/ ($SKILL_COUNT skills)"
     else
-        echo "WARN: skills/ 없음"
+        echo "WARN: skills/ missing"
     fi
 
     if [ "$MISSING" -eq 0 ]; then
-        echo "모든 파일 정상!"
+        echo "All files OK!"
     else
-        echo "${MISSING}개 파일 누락 → install.sh 재실행 필요"
+        echo "${MISSING} file(s) missing -> re-run install.sh"
     fi
 fi
 ```
 
-### 4. Keychain 토큰 확인
+### 4. Check Keychain Token
 
 ```bash
-echo "=== 4. Keychain 토큰 ==="
+echo "=== 4. Keychain Token ==="
 python3 -c "
 import subprocess, json
 from datetime import datetime
@@ -131,22 +131,22 @@ if result.returncode == 0:
         hours = int(remaining.total_seconds() // 3600)
         mins = int((remaining.total_seconds() % 3600) // 60)
         if remaining.total_seconds() > 0:
-            print(f'OK: 토큰 유효 ({hours}h {mins}m 남음)')
+            print(f'OK: Token valid ({hours}h {mins}m remaining)')
         else:
-            print('WARN: 토큰 만료됨 (재로그인 필요)')
+            print('WARN: Token expired (re-login required)')
     if oauth.get('refreshToken'):
-        print('OK: Refresh 토큰 존재')
+        print('OK: Refresh token exists')
     else:
-        print('FAIL: Refresh 토큰 없음 (재로그인 필요)')
+        print('FAIL: Refresh token missing (re-login required)')
 else:
-    print('FAIL: Keychain에 credential 없음 (로그인 필요)')
+    print('FAIL: No credential in Keychain (login required)')
 "
 ```
 
-### 5. 중복 계정 확인
+### 5. Check Duplicate Accounts
 
 ```bash
-echo "=== 5. 중복 계정 ==="
+echo "=== 5. Duplicate Accounts ==="
 python3 -c "
 import json
 index = json.load(open('$HOME/.claude/accounts/index.json'))
@@ -160,18 +160,18 @@ for acc in accounts:
     else:
         seen[key] = acc
 if duplicates:
-    print(f'WARN: {len(duplicates)}개 중복 계정 발견')
+    print(f'WARN: {len(duplicates)} duplicate account(s) found')
     for dup, orig in duplicates:
-        print(f'  중복: {dup[\"id\"]} ↔ {orig[\"id\"]} ({dup[\"email\"]})')
-    print('→ /account:remove로 불필요한 계정을 삭제하세요')
+        print(f'  Duplicate: {dup[\"id\"]} <-> {orig[\"id\"]} ({dup[\"email\"]})')
+    print('-> Use /account:remove to delete unnecessary accounts')
 else:
-    print('OK: 중복 없음')
+    print('OK: No duplicates')
 "
 ```
 
-### 6. 결과 요약
+### 6. Results Summary
 
-모든 체크가 완료되면 결과를 요약하여 사용자에게 보여주세요:
-- OK 항목 수
-- WARN 항목과 권장 조치
-- FAIL 항목과 즉시 조치 필요 사항
+After all checks are complete, summarize the results for the user:
+- Number of OK items
+- WARN items with recommended actions
+- FAIL items requiring immediate action

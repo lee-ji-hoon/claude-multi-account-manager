@@ -1,26 +1,26 @@
 ---
-description: 텔레그램에서 계정 데이터 가져오기 (다른 맥에서 push한 것). "계정 가져오기", "pull", "동기화" 요청 시 사용.
-argument-hint: [파일경로]
+description: Pull account data from Telegram (pushed from another Mac). Triggered by "pull accounts", "pull", "sync accounts".
+argument-hint: [file path]
 allowed-tools: [Bash]
 ---
 
 # Account Pull
 
-다른 맥에서 `/account:push`로 전송한 계정 데이터를 가져옵니다.
+Pulls account data that was sent from another Mac via `/account:push`.
 
 ## Instructions
 
-1. pull 명령을 실행하고 **결과를 사용자에게 그대로 출력**하세요:
+1. Run the pull command and **display the result to the user as-is**:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" pull $ARGUMENTS
 ```
 
-2. 가져오기 완료 후 `/account:list`로 확인을 안내하세요.
+2. After import is complete, suggest verifying with `/account:list`.
 
-**중요**: 모든 명령 실행 후 출력 결과를 코드 블록 없이 그대로 사용자에게 보여주세요.
+**Important**: After every command execution, show the output to the user as-is without code blocks.
 
 ## Notes
 
-- 인자 없이 실행: 텔레그램 고정 메시지에서 자동으로 가져옴
-- 파일 경로 제공: 로컬 JSON 파일에서 가져옴
-- 이미 등록된 계정은 자동으로 스킵됨
+- Run without arguments: Automatically fetches from the pinned Telegram message
+- Provide a file path: Imports from a local JSON file
+- Already registered accounts are automatically skipped
