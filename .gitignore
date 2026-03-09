@@ -45,3 +45,6 @@ Thumbs.db
 .claude/*
 !.claude/CLAUDE.md
 .claude-state/
+
+# Serena (MCP plugin local config)
+.serena/
