@@ -1,5 +1,4 @@
 ---
-name: account:repair
 description: 플러그인 설치 문제 진단 및 수리. "수리", "repair", "문제 해결", "설치 확인" 요청 시 사용.
 allowed-tools: [Bash, Read, Edit]
 ---
@@ -98,11 +97,11 @@ else
         MISSING=$((MISSING + 1))
     fi
 
-    if [ -d "$INSTALL_PATH/commands" ]; then
-        CMD_COUNT=$(ls "$INSTALL_PATH/commands/"*.md 2>/dev/null | wc -l | tr -d ' ')
-        echo "OK: commands/ ($CMD_COUNT개 명령)"
+    if [ -d "$INSTALL_PATH/skills" ]; then
+        SKILL_COUNT=$(ls -d "$INSTALL_PATH/skills/"*/ 2>/dev/null | wc -l | tr -d ' ')
+        echo "OK: skills/ ($SKILL_COUNT개 스킬)"
     else
-        echo "WARN: commands/ 없음"
+        echo "WARN: skills/ 없음"
     fi
 
     if [ "$MISSING" -eq 0 ]; then

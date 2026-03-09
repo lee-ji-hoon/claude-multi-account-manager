@@ -44,5 +44,4 @@ Thumbs.db
 # Claude Code
 .claude/*
 !.claude/CLAUDE.md
-!.claude/skills/
 .claude-state/
