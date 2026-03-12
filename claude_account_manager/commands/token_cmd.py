@@ -186,21 +186,30 @@ def _auto_migrate(index, current):
             log("INFO", f"[migrate] {acc['id']}: refreshBlocked 해제")
             print(f"[migrate] {acc['id']}: 갱신 차단 해제됨")
 
-        # 활성 계정에 credential 파일이 없으면 keychain에서 저장
-        if not acc.get("credentialFile") and current and is_same_account(acc, current):
-            keychain_cred = get_keychain_credential()
-            if keychain_cred and is_credential_valid(keychain_cred):
-                cred_file = f"credential_{acc['id']}.json"
-                cred_path = ACCOUNTS_DIR / cred_file
-                with open(cred_path, 'w', encoding='utf-8') as f:
-                    f.write(json.dumps(keychain_cred, indent=2, ensure_ascii=False))
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.chmod(cred_path, 0o600)
+        # credentialFile이 null인 계정 복구
+        if not acc.get("credentialFile"):
+            cred_file = f"credential_{acc['id']}.json"
+            cred_path = ACCOUNTS_DIR / cred_file
+
+            if current and is_same_account(acc, current):
+                # 현재 활성 계정: Keychain에서 credential 저장
+                keychain_cred = get_keychain_credential()
+                if keychain_cred and is_credential_valid(keychain_cred):
+                    with open(cred_path, 'w', encoding='utf-8') as f:
+                        f.write(json.dumps(keychain_cred, indent=2, ensure_ascii=False))
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.chmod(cred_path, 0o600)
+                    acc["credentialFile"] = cred_file
+                    migrated = True
+                    log("INFO", f"[migrate] {acc['id']}: credential 파일 생성 (keychain)")
+                    print(f"[migrate] {acc['id']}: credential 저장됨")
+            elif cred_path.exists():
+                # 비활성 계정: 디스크에 파일이 있으면 index만 복구
                 acc["credentialFile"] = cred_file
                 migrated = True
-                log("INFO", f"[migrate] {acc['id']}: credential 파일 생성")
-                print(f"[migrate] {acc['id']}: credential 저장됨")
+                log("INFO", f"[migrate] {acc['id']}: credentialFile index 복구")
+                print(f"[migrate] {acc['id']}: credentialFile 복구됨")
 
     if migrated:
         save_index(index)

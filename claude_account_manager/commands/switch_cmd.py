@@ -9,11 +9,11 @@ from ..config import ACCOUNTS_DIR, PLAN_LIMITS_DAILY, PLAN_LIMITS_WEEKLY, RESET_
 from ..ui import c, Colors, format_tokens, make_progress_bar, format_time_remaining
 from ..storage import load_index, save_index, load_claude_json, save_claude_json, get_current_account
 from ..keychain import get_keychain_credential, set_keychain_credential
-from ..token import RefreshError, classify_refresh_error
+from ..token import RefreshError, classify_refresh_error, is_credential_valid
 from .token_cmd import _safe_refresh_credential
 from ..logger import log
 from ..account import estimate_plan, is_same_account, _is_real_org
-from ..api import get_today_usage, get_weekly_usage, get_last_activity_time
+from ..api import get_today_usage, get_weekly_usage, get_last_activity_time, _fetch_usage_from_api
 
 
 def _cleanup_old_backups(backup_dir, prefix, keep=5):
@@ -189,6 +189,21 @@ def cmd_switch(account_id=None):
     credential_switched = False
     token_status = "no_credential"  # no_credential | fresh | refreshed | permanent_fail | transient_fail
     credential_file = account.get("credentialFile")
+
+    # credentialFile이 null인 경우: 예상 파일명으로 디스크 확인 후 index 복구
+    if not credential_file:
+        expected_file = f"credential_{account['id']}.json"
+        expected_path = ACCOUNTS_DIR / expected_file
+        if expected_path.exists():
+            # 파일은 있지만 index에 기록 안 됨 → index 복구
+            credential_file = expected_file
+            for i, acc in enumerate(index["accounts"]):
+                if acc["id"] == account_id:
+                    index["accounts"][i]["credentialFile"] = credential_file
+                    break
+            save_index(index)
+            log("INFO", f"switch: credentialFile index 복구됨 ({account['name']})")
+
     if credential_file:
         credential_path = ACCOUNTS_DIR / credential_file
         if credential_path.exists():
@@ -221,10 +236,15 @@ def cmd_switch(account_id=None):
     index["activeAccountId"] = account_id
     save_index(index)
 
+    # Plan 정보
+    plan = account.get("plan", "?")
+    plan_colors = {"Free": Colors.DIM, "Pro": Colors.CYAN, "Team": Colors.MAGENTA, "Max": Colors.YELLOW, "Max5": Colors.YELLOW, "Max20": Colors.GREEN}
+    plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
+
     print()
-    print(c(Colors.GREEN, "  계정 전환 완료"))
+    print(c(Colors.GREEN, f"  계정 전환 완료: {account['name']} {plan_badge}"))
     print(c(Colors.DIM, "  " + "─" * 40))
-    print(f"  {account['name']} ({account['email']})")
+    print(f"  {account['email']}")
 
     if credential_switched:
         if token_status == "refreshed":
@@ -237,8 +257,39 @@ def cmd_switch(account_id=None):
             print(f"  {c(Colors.DIM, '→ 네트워크 확인 후 /account check 로 상태를 확인하세요')}")
         else:
             print(f"  OAuth: {c(Colors.GREEN, '토큰 교체 완료')}")
+
+        # 전환된 계정의 사용량 표시
+        try:
+            real_usage = _fetch_usage_from_api()
+            if real_usage:
+                now = datetime.now(real_usage["sevenDayResetAt"].tzinfo) if real_usage.get("sevenDayResetAt") else datetime.now()
+                if real_usage.get("fiveHour") is not None:
+                    percentage = real_usage["fiveHour"]
+                    bar = make_progress_bar(percentage, width=12)
+                    reset_str = ""
+                    if real_usage.get("fiveHourResetAt"):
+                        remaining = real_usage["fiveHourResetAt"] - now
+                        if remaining.total_seconds() > 0:
+                            hours = int(remaining.total_seconds() // 3600)
+                            minutes = int((remaining.total_seconds() % 3600) // 60)
+                            reset_str = f" | {c(Colors.CYAN, '⏱')} {format_time_remaining(hours, minutes)}"
+                    print(f"  {c(Colors.DIM, '현재')} {bar} {percentage}%{reset_str}")
+                if real_usage.get("sevenDay") is not None:
+                    percentage = real_usage["sevenDay"]
+                    bar = make_progress_bar(percentage, width=12)
+                    reset_str = ""
+                    if real_usage.get("sevenDayResetAt"):
+                        remaining = real_usage["sevenDayResetAt"] - now
+                        if remaining.total_seconds() > 0:
+                            hours = int(remaining.total_seconds() // 3600)
+                            minutes = int((remaining.total_seconds() % 3600) // 60)
+                            reset_str = f" | {c(Colors.CYAN, '⏱')} {format_time_remaining(hours, minutes)}"
+                    print(f"  {c(Colors.DIM, '주간')} {bar} {percentage}%{reset_str}")
+        except Exception:
+            pass  # 사용량 조회 실패 시 무시 (전환 자체는 성공)
     else:
         print(f"  OAuth: {c(Colors.YELLOW, '토큰 없음 (재로그인 필요)')}")
+        print(f"  {c(Colors.DIM, '→ /login 후 /account:add 로 credential을 저장하세요')}")
 
     print()
     print(c(Colors.YELLOW, "  Claude Code를 재시작해야 변경사항이 적용됩니다."))

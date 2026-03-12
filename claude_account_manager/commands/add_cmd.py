@@ -165,13 +165,14 @@ def cmd_add(name=None):
         print(c(Colors.YELLOW, "  Keychain credential이 불완전합니다. 토큰 저장을 건너뜁니다."))
 
     # Update index
+    # credentialFile은 항상 파일명으로 저장 (null이면 switch 시 credential 교체가 스킵됨)
     account_entry = {
         "id": account_id,
         "name": name,
         "email": email,
         "plan": plan,
         "profileFile": profile_file,
-        "credentialFile": credential_file if has_credential else None,
+        "credentialFile": credential_file,
         "createdAt": datetime.now().isoformat()
     }
     if org_name:
