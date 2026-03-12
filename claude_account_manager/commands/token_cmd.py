@@ -168,6 +168,44 @@ def cmd_check():
     print()
 
 
+def _auto_migrate(index, current):
+    """세션 시작 시 자동 마이그레이션 (v2.2.6+)
+
+    v2.2.5 이하에서 keychain -a 미지정으로 발생한 문제를 자동 복구:
+    - refreshBlocked 해제 (keychain 읽기 버그로 인한 오차단)
+    - 활성 계정의 누락된 credential 파일 생성
+    """
+    migrated = False
+
+    for acc in index["accounts"]:
+        # refreshBlocked 자동 해제
+        if acc.get("refreshBlocked"):
+            acc.pop("refreshBlocked", None)
+            acc.pop("refreshBlockedAt", None)
+            migrated = True
+            log("INFO", f"[migrate] {acc['id']}: refreshBlocked 해제")
+            print(f"[migrate] {acc['id']}: 갱신 차단 해제됨")
+
+        # 활성 계정에 credential 파일이 없으면 keychain에서 저장
+        if not acc.get("credentialFile") and current and is_same_account(acc, current):
+            keychain_cred = get_keychain_credential()
+            if keychain_cred and is_credential_valid(keychain_cred):
+                cred_file = f"credential_{acc['id']}.json"
+                cred_path = ACCOUNTS_DIR / cred_file
+                with open(cred_path, 'w', encoding='utf-8') as f:
+                    f.write(json.dumps(keychain_cred, indent=2, ensure_ascii=False))
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.chmod(cred_path, 0o600)
+                acc["credentialFile"] = cred_file
+                migrated = True
+                log("INFO", f"[migrate] {acc['id']}: credential 파일 생성")
+                print(f"[migrate] {acc['id']}: credential 저장됨")
+
+    if migrated:
+        save_index(index)
+
+
 def cmd_refresh_all():
     """모든 등록된 계정의 토큰 갱신 (Hook용, 비대화형)
 
@@ -184,11 +222,16 @@ def cmd_refresh_all():
         log("INFO", "cmd_refresh_all: 등록된 계정 없음")
         return 0
 
+    # 자동 마이그레이션 (v2.2.6+: keychain -a 수정 후 복구)
+    current = get_current_account()
+    _auto_migrate(index, current)
+    # 마이그레이션 후 index 다시 읽기 (save 되었을 수 있음)
+    index = load_index()
+
     log("INFO", f"=== SessionStart: cmd_refresh_all 시작 (계정 {len(index['accounts'])}개) ===")
     refreshed_count = 0
     skipped_count = 0
     error_count = 0
-    current = get_current_account()
 
     for acc in index["accounts"]:
         # Circuit breaker: 영구 실패로 차단된 계정 스킵

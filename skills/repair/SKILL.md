@@ -117,27 +117,42 @@ fi
 ```bash
 echo "=== 4. Keychain Token ==="
 python3 -c "
-import subprocess, json
+import subprocess, json, os, pwd
 from datetime import datetime
-result = subprocess.run(['security', 'find-generic-password', '-s', 'Claude Code-credentials', '-w'],
+
+username = os.environ.get('USER') or pwd.getpwuid(os.getuid()).pw_name
+service = 'Claude Code-credentials'
+
+# Claude Code 2.1.x+: -a username으로 정확한 항목 검색
+result = subprocess.run(['security', 'find-generic-password', '-s', service, '-a', username, '-w'],
                        capture_output=True, text=True)
+if result.returncode != 0:
+    # Fallback: -a 없이 검색 (이전 버전)
+    result = subprocess.run(['security', 'find-generic-password', '-s', service, '-w'],
+                           capture_output=True, text=True)
+
 if result.returncode == 0:
     cred = json.loads(result.stdout.strip())
     oauth = cred.get('claudeAiOauth', {})
-    expires_at = oauth.get('expiresAt')
-    if expires_at:
-        exp = datetime.fromtimestamp(expires_at / 1000)
-        remaining = exp - datetime.now()
-        hours = int(remaining.total_seconds() // 3600)
-        mins = int((remaining.total_seconds() % 3600) // 60)
-        if remaining.total_seconds() > 0:
-            print(f'OK: Token valid ({hours}h {mins}m remaining)')
-        else:
-            print('WARN: Token expired (re-login required)')
-    if oauth.get('refreshToken'):
-        print('OK: Refresh token exists')
+    if not oauth:
+        print('WARN: claudeAiOauth missing (mcpOAuth only entry)')
+        print('  -> This may be the wrong keychain entry (account=unknown)')
+        print('  -> Update plugin to v2.2.6+ to fix')
     else:
-        print('FAIL: Refresh token missing (re-login required)')
+        expires_at = oauth.get('expiresAt')
+        if expires_at:
+            exp = datetime.fromtimestamp(expires_at / 1000)
+            remaining = exp - datetime.now()
+            hours = int(remaining.total_seconds() // 3600)
+            mins = int((remaining.total_seconds() % 3600) // 60)
+            if remaining.total_seconds() > 0:
+                print(f'OK: Token valid ({hours}h {mins}m remaining)')
+            else:
+                print('WARN: Token expired (re-login required)')
+        if oauth.get('refreshToken'):
+            print('OK: Refresh token exists')
+        else:
+            print('FAIL: Refresh token missing (re-login required)')
 else:
     print('FAIL: No credential in Keychain (login required)')
 "
