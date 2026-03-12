@@ -21,19 +21,42 @@ KEYCHAIN_SERVICE = get_keychain_service()
 KEYCHAIN_ACCOUNT = os.environ.get("USER") or pwd.getpwuid(os.getuid()).pw_name
 
 
-def get_keychain_credential():
-    """Keychain에서 Claude Code credential 읽기"""
+def _read_keychain_entry(service, account=None):
+    """Keychain 항목 1건 읽기 (내부 헬퍼)"""
+    cmd = ["security", "find-generic-password", "-s", service]
+    if account:
+        cmd += ["-a", account]
+    cmd.append("-w")
     try:
-        result = subprocess.run(
-            ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
-            capture_output=True, text=True
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
             return json.loads(result.stdout.strip())
-        return None
-    except (subprocess.SubprocessError, json.JSONDecodeError) as e:
-        print(f"  Keychain 읽기 실패: {e}")
-        return None
+    except (subprocess.SubprocessError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def get_keychain_credential():
+    """Keychain에서 Claude Code credential 읽기
+
+    Claude Code 2.1.x+는 동일 service에 여러 account 항목을 저장:
+      - account=username: claudeAiOauth + mcpOAuth (실제 credential)
+      - account=unknown: mcpOAuth만 (MCP 전용)
+    -a 없이 검색하면 잘못된 항목이 반환될 수 있으므로
+    account를 지정하여 정확한 항목을 먼저 시도한다.
+    """
+    # 1차: -a username 지정 (Claude Code 2.1.x+ 구조)
+    cred = _read_keychain_entry(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+    if cred and "claudeAiOauth" in cred:
+        return cred
+
+    # 2차: -a 없이 검색 (이전 버전 호환)
+    cred_no_account = _read_keychain_entry(KEYCHAIN_SERVICE)
+    if cred_no_account and "claudeAiOauth" in cred_no_account:
+        return cred_no_account
+
+    # claudeAiOauth가 없는 credential이라도 반환 (호출부에서 판단)
+    return cred or cred_no_account
 
 
 def set_keychain_credential(credential_data):

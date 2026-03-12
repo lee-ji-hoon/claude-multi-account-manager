@@ -1,7 +1,7 @@
 {
   "name": "account",
   "description": "Claude Code multi-account manager - switch accounts, monitor usage, auto-refresh tokens",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "author": {
     "name": "ezhoon"
   },
