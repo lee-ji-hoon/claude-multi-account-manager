@@ -36,30 +36,36 @@ def detect_plan_from_credential(credential):
     """credential에서 Plan 자동 감지
 
     우선순위:
-    1. rateLimitTier에서 max_5x/max_20x 감지 → Max5/Max20
-    2. subscriptionType에서 team/pro/max 감지 → Team/Pro/Max5
+    1. subscriptionType 우선 (team/pro/max 구분에 정확)
+    2. subscriptionType이 max인 경우에만 rateLimitTier로 Max5/Max20 세분화
     3. 기본값 → Free
+
+    Note: Team Premium 좌석은 rateLimitTier가 "default_claude_max_5x"이지만
+          subscriptionType은 "team"이므로 subscriptionType을 우선해야 함.
     """
     oauth = credential.get("claudeAiOauth", {})
     subscription_type = oauth.get("subscriptionType", "").lower()
     rate_limit_tier = oauth.get("rateLimitTier", "").lower()
 
-    # rateLimitTier 우선 (Max 플랜 구분에 정확)
-    if "max_20" in rate_limit_tier or "max20" in rate_limit_tier:
-        return "Max20"
-    elif "max_5" in rate_limit_tier or "max5" in rate_limit_tier:
-        return "Max5"
-
-    # subscriptionType 기반
+    # subscriptionType 우선 (Team Premium이 rateLimitTier에 max_5x를 가질 수 있음)
     if "team" in subscription_type:
         return "Team"
-    elif "pro" in subscription_type:
-        return "Pro"
     elif "max" in subscription_type:
         match = re.search(r'max[_\s-]?(\d+)', subscription_type)
         if match:
             num = int(match.group(1))
             return "Max20" if num >= 20 else "Max5"
+        # subscriptionType에 숫자가 없으면 rateLimitTier로 세분화
+        if "max_20" in rate_limit_tier or "max20" in rate_limit_tier:
+            return "Max20"
+        return "Max5"
+    elif "pro" in subscription_type:
+        return "Pro"
+
+    # subscriptionType이 비어있거나 알 수 없으면 rateLimitTier fallback
+    if "max_20" in rate_limit_tier or "max20" in rate_limit_tier:
+        return "Max20"
+    elif "max_5" in rate_limit_tier or "max5" in rate_limit_tier:
         return "Max5"
 
     return "Free"

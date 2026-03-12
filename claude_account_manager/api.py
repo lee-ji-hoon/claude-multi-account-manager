@@ -245,9 +245,11 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
     # 캐시 키: 토큰 앞 20자 해시 (계정 식별용)
     cache_key = access_token[:20]
 
-    # Plan 이름 결정
+    # Plan 이름 결정 (subscriptionType 우선, Team Premium은 rateLimitTier에 max_5x가 있을 수 있음)
     sub_lower = subscription_type.lower()
-    if "max" in sub_lower:
+    if "team" in sub_lower:
+        plan_name = "Team"
+    elif "max" in sub_lower:
         match = re.search(r'max[_\s-]?(\d+)', sub_lower)
         if match:
             num = int(match.group(1))
@@ -256,8 +258,6 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
             plan_name = "Max5"
     elif "pro" in sub_lower:
         plan_name = "Pro"
-    elif "team" in sub_lower:
-        plan_name = "Team"
     elif not subscription_type or "api" in sub_lower:
         if include_token_status:
             return None, TokenStatus.VALID

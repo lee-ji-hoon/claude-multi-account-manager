@@ -3,17 +3,18 @@ cmd_switch: Switch between accounts
 """
 import json
 import os
+import time
 from datetime import datetime, timedelta
 
-from ..config import ACCOUNTS_DIR, PLAN_LIMITS_DAILY, PLAN_LIMITS_WEEKLY, RESET_HOURS
-from ..ui import c, Colors, format_tokens, make_progress_bar, format_time_remaining
+from ..config import ACCOUNTS_DIR
+from ..ui import c, Colors, make_progress_bar, format_time_remaining
 from ..storage import load_index, save_index, load_claude_json, save_claude_json, get_current_account
 from ..keychain import get_keychain_credential, set_keychain_credential
-from ..token import RefreshError, classify_refresh_error, is_credential_valid
+from ..token import RefreshError, TokenStatus, classify_refresh_error, is_credential_valid
 from .token_cmd import _safe_refresh_credential
 from ..logger import log
 from ..account import estimate_plan, is_same_account, _is_real_org
-from ..api import get_today_usage, get_weekly_usage, get_last_activity_time, _fetch_usage_from_api
+from ..api import _fetch_usage_from_api
 
 
 def _cleanup_old_backups(backup_dir, prefix, keep=5):
@@ -42,13 +43,66 @@ def cmd_switch(account_id=None):
         print(c(Colors.DIM, "  " + "─" * 55))
 
         current = get_current_account()
-        current_email = current.get("emailAddress", "")
         current_plan = estimate_plan(current)
-        today_usage = get_today_usage()
-        last_activity = get_last_activity_time()
 
+        def _is_current(acc):
+            return is_same_account(acc, current)
+
+        # 전체 계정 사용량 가져오기 (list와 동일)
+        usage_map = {}
+        token_status_map = {}
+
+        def _fetch_for_account(acc):
+            if _is_current(acc):
+                usage, ts = _fetch_usage_from_api(include_token_status=True)
+                return (acc["id"], usage, ts)
+            else:
+                cred_filename = acc.get("credentialFile")
+                if cred_filename:
+                    credential_path = ACCOUNTS_DIR / cred_filename
+                    if credential_path.exists():
+                        try:
+                            credential = json.loads(credential_path.read_text())
+                            usage, ts = _fetch_usage_from_api(
+                                credential, include_token_status=True,
+                                credential_file=credential_path
+                            )
+                            return (acc["id"], usage, ts)
+                        except Exception:
+                            pass
+                return (acc["id"], None, TokenStatus.NO_TOKEN)
+
+        # 현재 계정 먼저, 나머지 순차 (429 방지)
+        current_acc = None
+        other_accs = []
+        for acc in index["accounts"]:
+            if _is_current(acc):
+                current_acc = acc
+            else:
+                other_accs.append(acc)
+
+        if current_acc:
+            try:
+                acc_id, usage, ts = _fetch_for_account(current_acc)
+                usage_map[acc_id] = usage
+                token_status_map[acc_id] = ts
+            except Exception:
+                pass
+
+        if other_accs:
+            time.sleep(1)
+            for acc in other_accs:
+                try:
+                    acc_id, usage, ts = _fetch_for_account(acc)
+                    usage_map[acc_id] = usage
+                    token_status_map[acc_id] = ts
+                except Exception:
+                    pass
+                time.sleep(1)
+
+        # 계정 목록 출력
         for i, acc in enumerate(index["accounts"], 1):
-            is_current = is_same_account(acc, current)
+            is_current = _is_current(acc)
             marker = c(Colors.GREEN, "●") if is_current else " "
 
             # Plan 정보
@@ -75,37 +129,44 @@ def cmd_switch(account_id=None):
             print(f"  [{i}] {marker} {acc['name']}{org_badge} {plan_badge}")
             print(f"      {c(Colors.DIM, acc['email'])}")
 
-            # 현재 계정이면 사용량 표시
-            if is_current:
-                if today_usage:
-                    tokens = today_usage["tokens"]
-                    limit = PLAN_LIMITS_DAILY.get(plan, PLAN_LIMITS_DAILY["Unknown"])
-                    percentage = min(100, (tokens / limit) * 100)
-                    bar = make_progress_bar(percentage, width=12)
-                    print(f"      {c(Colors.DIM, '오늘')} {bar} {format_tokens(tokens)} ({percentage:.0f}%)")
+            # 사용량 표시 (전체 계정)
+            real_usage = usage_map.get(acc["id"])
+            ts = token_status_map.get(acc["id"], TokenStatus.NO_TOKEN)
 
-                weekly_usage = get_weekly_usage()
-                if weekly_usage:
-                    tokens = weekly_usage["tokens"]
-                    limit = PLAN_LIMITS_WEEKLY.get(plan, PLAN_LIMITS_WEEKLY["Unknown"])
-                    percentage = min(100, (tokens / limit) * 100)
+            if ts == TokenStatus.EXPIRED:
+                print(f"      {c(Colors.RED, '⚠ 토큰 만료')} - {c(Colors.YELLOW, '재로그인 필요')}")
+            elif ts == TokenStatus.INVALID:
+                print(f"      {c(Colors.RED, '⚠ 토큰 무효')} - {c(Colors.YELLOW, '재로그인 필요')}")
+            elif ts == TokenStatus.NO_TOKEN:
+                print(f"      {c(Colors.DIM, '(credential 없음)')}")
+            elif ts == TokenStatus.ERROR:
+                print(f"      {c(Colors.YELLOW, '⚠ 연결 오류')}")
+            elif real_usage:
+                now = datetime.now(real_usage["sevenDayResetAt"].tzinfo) if real_usage.get("sevenDayResetAt") else datetime.now()
+                if real_usage.get("fiveHour") is not None:
+                    percentage = real_usage["fiveHour"]
                     bar = make_progress_bar(percentage, width=12)
-                    print(f"      {c(Colors.DIM, '주간')} {bar} {format_tokens(tokens)} ({percentage:.0f}%)")
+                    reset_str = ""
+                    if real_usage.get("fiveHourResetAt"):
+                        remaining = real_usage["fiveHourResetAt"] - now
+                        if remaining.total_seconds() > 0:
+                            hours = int(remaining.total_seconds() // 3600)
+                            minutes = int((remaining.total_seconds() % 3600) // 60)
+                            reset_str = f" | {c(Colors.CYAN, '⏱')} {hours}h {minutes}m"
+                    print(f"      {c(Colors.DIM, '현재')} {bar} {percentage}%{reset_str}")
+                if real_usage.get("sevenDay") is not None:
+                    percentage = real_usage["sevenDay"]
+                    bar = make_progress_bar(percentage, width=12)
+                    reset_str = ""
+                    if real_usage.get("sevenDayResetAt"):
+                        remaining = real_usage["sevenDayResetAt"] - now
+                        if remaining.total_seconds() > 0:
+                            hours = int(remaining.total_seconds() // 3600)
+                            minutes = int((remaining.total_seconds() % 3600) // 60)
+                            reset_str = f" | {c(Colors.CYAN, '⏱')} {hours}h {minutes}m"
+                    print(f"      {c(Colors.DIM, '주간')} {bar} {percentage}%{reset_str}")
 
         print(c(Colors.DIM, "  " + "─" * 55))
-
-        # 리셋 시간 표시
-        if last_activity:
-            reset_hours = RESET_HOURS.get(current_plan, 5)
-            reset_time = last_activity + timedelta(hours=reset_hours)
-            now = datetime.now()
-            if reset_time > now:
-                remaining = reset_time - now
-                hours = int(remaining.total_seconds() // 3600)
-                minutes = int((remaining.total_seconds() % 3600) // 60)
-                time_str = format_time_remaining(hours, minutes)
-                print(f"  {c(Colors.CYAN, '⏱')} 리셋까지: {time_str}")
-                print(c(Colors.DIM, "  " + "─" * 55))
 
         print(f"  {c(Colors.DIM, '번호를 입력하세요 (취소: q)')}: ", end="", flush=True)
 
