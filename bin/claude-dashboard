@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+"""
+Claude Code Status Dashboard → Obsidian
+
+Reads account data, token expiry, tmux sessions, running processes,
+and API usage, then writes a markdown dashboard to the Obsidian vault.
+
+Designed to run every 5 minutes via launchd.
+"""
+import json
+import os
+import subprocess
+import sys
+import urllib.request
+import urllib.error
+from datetime import datetime, timedelta
+from pathlib import Path
+
+# ── Paths ──────────────────────────────────────────────────────────
+CLAUDE_DIR = Path.home() / ".claude"
+ACCOUNTS_DIR = CLAUDE_DIR / "accounts"
+INDEX_FILE = ACCOUNTS_DIR / "index.json"
+STATS_CACHE = CLAUDE_DIR / "stats-cache.json"
+
+OBSIDIAN_VAULT = (
+    Path.home()
+    / "Library"
+    / "CloudStorage"
+    / "GoogleDrive-dlwlgns1240@gmail.com"
+    / "내 드라이브"
+    / "Obsidian"
+)
+DASHBOARD_FILE = OBSIDIAN_VAULT / "프로젝트" / "Claude Dashboard.md"
+
+# Anthropic usage API
+USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage"
+KEYCHAIN_SERVICE = "Claude Code-credentials"
+
+
+# ── Helpers ────────────────────────────────────────────────────────
+
+def run_cmd(args, timeout=5):
+    """Run a subprocess and return stdout, or None on failure."""
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+        return None
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return None
+
+
+def get_keychain_credential():
+    """Read the active Claude Code credential from the macOS Keychain."""
+    raw = run_cmd(["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"])
+    if raw:
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def load_json(path):
+    """Safely load a JSON file."""
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+# ── Account data ───────────────────────────────────────────────────
+
+def load_accounts():
+    """Return list of accounts from index.json."""
+    index = load_json(INDEX_FILE)
+    if not index:
+        return []
+    return index.get("accounts", [])
+
+
+def get_token_remaining(credential_file):
+    """
+    Read a credential file and return (remaining_hours, remaining_str).
+    Returns (None, "N/A") on failure.
+    """
+    cred = load_json(ACCOUNTS_DIR / credential_file)
+    if not cred:
+        return None, "N/A"
+
+    oauth = cred.get("claudeAiOauth", {})
+    expires_at = oauth.get("expiresAt")
+    if not expires_at:
+        return None, "N/A"
+
+    expires_dt = datetime.fromtimestamp(expires_at / 1000)
+    remaining = expires_dt - datetime.now()
+    total_seconds = remaining.total_seconds()
+
+    if total_seconds <= 0:
+        return 0, "❌ expired"
+
+    hours = total_seconds / 3600
+    if hours < 1:
+        mins = int(total_seconds / 60)
+        return hours, f"⚠️ {mins}m"
+    elif hours < 3:
+        return hours, f"⚠️ {hours:.1f}h"
+    else:
+        return hours, f"✅ {hours:.1f}h"
+
+
+# ── API usage ──────────────────────────────────────────────────────
+
+def fetch_usage_for_credential(credential):
+    """
+    Fetch usage from the Anthropic API for a given credential dict.
+    Returns dict with fiveHour, sevenDay (percentage ints) or None.
+    """
+    oauth = credential.get("claudeAiOauth", {})
+    access_token = oauth.get("accessToken")
+    if not access_token:
+        return None
+
+    try:
+        req = urllib.request.Request(
+            USAGE_API_URL,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "anthropic-beta": "oauth-2025-04-20",
+                "User-Agent": "claude-dashboard/1.0",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+
+        result = {"fiveHour": None, "sevenDay": None}
+        five = data.get("five_hour", {})
+        if five.get("utilization") is not None:
+            result["fiveHour"] = max(0, min(100, round(five["utilization"])))
+        seven = data.get("seven_day", {})
+        if seven.get("utilization") is not None:
+            result["sevenDay"] = max(0, min(100, round(seven["utilization"])))
+        return result
+    except Exception:
+        return None
+
+
+def get_usage_for_account(account):
+    """
+    Get usage for a single account.
+    Tries: 1) credential file token, 2) Keychain (for active account).
+    Returns dict or None.
+    """
+    cred_file = account.get("credentialFile")
+    if cred_file:
+        cred = load_json(ACCOUNTS_DIR / cred_file)
+        if cred:
+            usage = fetch_usage_for_credential(cred)
+            if usage:
+                return usage
+
+    # Fallback: try Keychain credential (works for the currently active account)
+    kc_cred = get_keychain_credential()
+    if kc_cred:
+        return fetch_usage_for_credential(kc_cred)
+    return None
+
+
+# ── Tmux sessions ──────────────────────────────────────────────────
+
+def get_tmux_sessions():
+    """
+    Return list of dicts: {name, windows, status}.
+    Each windows entry is a list of window names.
+    """
+    sessions_raw = run_cmd(["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"])
+    if not sessions_raw:
+        return []
+
+    sessions = []
+    for line in sessions_raw.splitlines():
+        parts = line.split(":")
+        if len(parts) < 2:
+            continue
+        session_name = parts[0]
+        attached = parts[1].strip() != "0"
+
+        # Get windows for this session
+        windows_raw = run_cmd([
+            "tmux", "list-windows", "-t", session_name,
+            "-F", "#{window_name}"
+        ])
+        windows = windows_raw.splitlines() if windows_raw else []
+
+        sessions.append({
+            "name": session_name,
+            "windows": windows,
+            "attached": attached,
+        })
+
+    return sessions
+
+
+# ── Claude processes ───────────────────────────────────────────────
+
+def get_claude_processes():
+    """Count running Claude Code (node) processes."""
+    raw = run_cmd(["pgrep", "-f", "claude"], timeout=3)
+    if not raw:
+        return 0
+    return len(raw.splitlines())
+
+
+# ── Dashboard rendering ───────────────────────────────────────────
+
+def usage_bar(pct):
+    """Render a small text-based usage bar."""
+    if pct is None:
+        return "—"
+    filled = round(pct / 10)
+    bar = "█" * filled + "░" * (10 - filled)
+    return f"`{bar}` {pct}%"
+
+
+def render_dashboard():
+    """Build the full markdown string."""
+    now = datetime.now()
+    now_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
+    now_display = now.strftime("%Y-%m-%d %H:%M")
+    hostname = run_cmd(["hostname", "-s"]) or "unknown"
+
+    lines = []
+
+    # Frontmatter
+    lines.append("---")
+    lines.append(f"updated: {now_iso}")
+    lines.append("tags: [claude, dashboard, auto-generated]")
+    lines.append("---")
+    lines.append("")
+    lines.append("# Claude Code Dashboard")
+    lines.append(f"> Last updated: {now_display} (auto-generated every 5min)")
+    lines.append("")
+
+    # ── Accounts table ──
+    accounts = load_accounts()
+    lines.append("## Accounts")
+    if accounts:
+        lines.append("| # | Name | Email | Plan | Usage (5h) | Usage (7d) | Token |")
+        lines.append("|---|------|-------|------|-----------|-----------|-------|")
+
+        for i, acct in enumerate(accounts, 1):
+            name = acct.get("name", "?")
+            org = acct.get("organizationName", "")
+            if org:
+                name = f"{name} @{org}"
+            email = acct.get("email", "?")
+            plan = acct.get("plan", "?")
+
+            # Token status
+            cred_file = acct.get("credentialFile", "")
+            _, token_str = get_token_remaining(cred_file)
+
+            # Check if refresh is blocked
+            if acct.get("refreshBlocked"):
+                blocked_at = acct.get("refreshBlockedAt", "")
+                token_str = f"🚫 blocked ({blocked_at[:10]})" if blocked_at else "🚫 blocked"
+
+            # Usage from API
+            usage = get_usage_for_account(acct)
+            five_h = usage_bar(usage.get("fiveHour") if usage else None)
+            seven_d = usage_bar(usage.get("sevenDay") if usage else None)
+
+            lines.append(
+                f"| {i} | {name} | {email} | {plan} | {five_h} | {seven_d} | {token_str} |"
+            )
+    else:
+        lines.append("> No accounts configured.")
+    lines.append("")
+
+    # ── Tmux sessions table ──
+    lines.append("## Sessions")
+    tmux_sessions = get_tmux_sessions()
+    if tmux_sessions:
+        lines.append("| Mac | Session | Windows | Status |")
+        lines.append("|-----|---------|---------|--------|")
+        for sess in tmux_sessions:
+            windows_str = ", ".join(sess["windows"]) if sess["windows"] else "—"
+            status = "🟢" if sess["attached"] else "⚪"
+            lines.append(
+                f"| {hostname} | {sess['name']} | {windows_str} | {status} |"
+            )
+    else:
+        lines.append("> No tmux sessions running.")
+    lines.append("")
+
+    # ── Processes ──
+    proc_count = get_claude_processes()
+    lines.append("## Processes")
+    lines.append(f"- Claude-related processes: **{proc_count}**")
+    lines.append("")
+
+    # ── Local stats summary ──
+    stats = load_json(STATS_CACHE)
+    if stats:
+        lines.append("## Stats (local cache)")
+        lines.append(f"- Total sessions: **{stats.get('totalSessions', '?')}**")
+        lines.append(f"- Total messages: **{stats.get('totalMessages', '?')}**")
+        first = stats.get("firstSessionDate", "?")
+        if first and first != "?":
+            first = first[:10]
+        lines.append(f"- Tracking since: **{first}**")
+        lines.append("")
+
+    # ── Quick Actions ──
+    lines.append("## Quick Actions (Telegram)")
+    lines.append("- `/peek@<window>` - 현재 출력 보기")
+    lines.append("- `/list` - 세션 목록")
+    lines.append("- `/sw <window>` - 세션 전환")
+    lines.append("- `/send <window> <text>` - 명령어 전송")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+# ── Main ───────────────────────────────────────────────────────────
+
+def main():
+    # Ensure output directory exists
+    DASHBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        content = render_dashboard()
+    except Exception as e:
+        # Write error info to dashboard so it's visible
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        content = (
+            f"---\nupdated: {now}\ntags: [claude, dashboard, auto-generated]\n---\n"
+            f"# Claude Code Dashboard\n"
+            f"> ⚠️ Error generating dashboard: {e}\n"
+        )
+
+    try:
+        DASHBOARD_FILE.write_text(content, encoding="utf-8")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard written to {DASHBOARD_FILE}")
+    except OSError as e:
+        print(f"ERROR: Failed to write dashboard: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
