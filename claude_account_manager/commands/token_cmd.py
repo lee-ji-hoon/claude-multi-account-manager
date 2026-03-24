@@ -4,13 +4,11 @@ cmd_check, cmd_refresh_all, cmd_refresh_expiring: Token management commands
 import fcntl
 import json
 import os
-import sys
 
 from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
 from ..keychain import get_keychain_credential
-from datetime import datetime
 from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon, is_token_fresh, is_credential_valid, classify_refresh_error, RefreshError
 from ..api import _fetch_usage_from_api
 from ..account import detect_plan_from_credential, is_same_account
@@ -169,22 +167,19 @@ def cmd_check():
 
 
 def _auto_migrate(index, current):
-    """세션 시작 시 자동 마이그레이션 (v2.2.6+)
+    """세션 시작 시 자동 마이그레이션
 
-    v2.2.5 이하에서 keychain -a 미지정으로 발생한 문제를 자동 복구:
-    - refreshBlocked 해제 (keychain 읽기 버그로 인한 오차단)
-    - 활성 계정의 누락된 credential 파일 생성
+    레거시 필드 정리 및 누락된 credential 파일 복구.
     """
     migrated = False
 
     for acc in index["accounts"]:
-        # refreshBlocked 자동 해제
-        if acc.get("refreshBlocked"):
+        # v2.3.0: refreshBlocked 레거시 필드 제거
+        if acc.get("refreshBlocked") is not None or acc.get("refreshBlockedAt") is not None:
             acc.pop("refreshBlocked", None)
             acc.pop("refreshBlockedAt", None)
             migrated = True
-            log("INFO", f"[migrate] {acc['id']}: refreshBlocked 해제")
-            print(f"[migrate] {acc['id']}: 갱신 차단 해제됨")
+            log("INFO", f"[migrate] {acc['id']}: refreshBlocked 레거시 필드 제거")
 
         # credentialFile이 null인 계정 복구
         if not acc.get("credentialFile"):
@@ -243,13 +238,6 @@ def cmd_refresh_all():
     error_count = 0
 
     for acc in index["accounts"]:
-        # Circuit breaker: 영구 실패로 차단된 계정 스킵
-        if acc.get("refreshBlocked"):
-            skipped_count += 1
-            log("INFO", f"[{acc['id']}] refreshBlocked → 스킵 (차단 시각: {acc.get('refreshBlockedAt', '?')})")
-            print(f"[refresh] {acc['id']}: 갱신 차단됨 (재등록 필요) → 스킵")
-            continue
-
         credential_file = acc.get("credentialFile")
         if not credential_file:
             continue
@@ -336,16 +324,13 @@ def cmd_refresh_all():
             refreshed_count += 1
             print(f"[refresh] {acc['id']}: 토큰 갱신됨 [{detected_plan}]")
         elif error:
-            # Circuit breaker: permanent 에러 시 차단 마킹
-            if error.startswith("permanent:"):
-                acc["refreshBlocked"] = True
-                acc["refreshBlockedAt"] = datetime.now().isoformat()
-                actual_error = error[len("permanent:"):]
-                log("ERROR", f"[{acc['id']}] 영구 갱신 실패 → 차단 마킹: {actual_error}")
-                print(f"[refresh] {acc['id']}: 영구 실패 차단됨 - {actual_error}", file=sys.stderr)
+            actual_error = error[len("permanent:"):] if error.startswith("permanent:") else error
+            is_permanent = error.startswith("permanent:")
+            log("ERROR", f"[{acc['id']}] 갱신 실패 ({'영구' if is_permanent else '일시'}): {actual_error}")
+            if is_permanent:
+                print(f"[refresh] {acc['id']}: 토큰 만료 - 해당 계정으로 재로그인 후 /account:add 필요")
             else:
-                log("ERROR", f"[{acc['id']}] cmd_refresh_all 갱신 실패: {error}")
-                print(f"[refresh] {acc['id']}: 갱신 실패 - {error}", file=sys.stderr)
+                print(f"[refresh] {acc['id']}: 갱신 실패 - {actual_error}")
             error_count += 1
 
     # index 저장 (Plan 정보 갱신)
@@ -376,16 +361,9 @@ def cmd_refresh_expiring(hours=1):
     expiring_found = 0
     current = get_current_account()
 
-    needs_save = False
-
     for acc in index["accounts"]:
         # 현재 계정은 스킵 (이미 활성 상태)
         if current and is_same_account(acc, current):
-            continue
-
-        # Circuit breaker: 영구 실패로 차단된 계정 스킵
-        if acc.get("refreshBlocked"):
-            log("INFO", f"[{acc['id']}] refreshBlocked → 스킵")
             continue
 
         credential_file = acc.get("credentialFile")
@@ -421,17 +399,10 @@ def cmd_refresh_expiring(hours=1):
             refreshed_count += 1
             print(f"[refresh] {acc['id']}: 만료 임박 토큰 갱신됨 [{detected_plan}]")
         elif error:
-            # Circuit breaker: permanent 에러 시 차단 마킹
-            if error.startswith("permanent:"):
-                acc["refreshBlocked"] = True
-                acc["refreshBlockedAt"] = datetime.now().isoformat()
-                needs_save = True
-                actual_error = error[len("permanent:"):]
-                log("ERROR", f"[{acc['id']}] 만료 임박 영구 실패 → 차단 마킹: {actual_error}")
-            else:
-                log("ERROR", f"[{acc['id']}] 만료 임박 갱신 실패: {error}")
+            actual_error = error[len("permanent:"):] if error.startswith("permanent:") else error
+            log("ERROR", f"[{acc['id']}] 만료 임박 갱신 실패: {actual_error}")
 
-    if refreshed_count > 0 or needs_save:
+    if refreshed_count > 0:
         save_index(index)
 
     if expiring_found == 0:
