@@ -3,12 +3,13 @@ OAuth token management: expiration, refresh, status checking
 """
 import json
 import os
+import time
 import urllib.request
 import urllib.error
 import urllib.parse
 from datetime import datetime, timedelta
 
-from .config import TOKEN_VALIDITY_HOURS, TOKEN_FRESH_THRESHOLD_HOURS
+from .config import TOKEN_VALIDITY_HOURS, TOKEN_FRESH_THRESHOLD_HOURS, REFRESH_MAX_RETRIES, REFRESH_RETRY_BACKOFF_BASE
 from .keychain import get_keychain_credential, set_keychain_credential
 from .logger import log, log_token_info
 
@@ -45,19 +46,29 @@ class RefreshError:
 
 
 def classify_refresh_error(error_message):
-    """갱신 실패 에러 메시지를 영구적/일시적으로 분류"""
+    """갱신 실패 에러 메시지를 영구적/일시적으로 분류
+
+    영구적: refresh token이 확실히 무효 (재로그인 필요)
+    일시적: 서버 장애, 네트워크 오류 등 (다음 세션에서 재시도 가능)
+    """
     if not error_message:
         return RefreshError.TRANSIENT
 
     msg = error_message.lower()
 
-    # 영구적 실패: refresh token 자체가 무효
+    # 영구적 실패: refresh token이 확실히 무효
     if "invalid_grant" in msg:
         return RefreshError.PERMANENT
-    if "http 400" in msg or "http 401" in msg:
+    if "http 401" in msg:
         return RefreshError.PERMANENT
 
-    # 그 외는 일시적 (네트워크, 타임아웃 등)
+    # HTTP 400 (invalid_grant 없음) → 일시적으로 분류
+    # 서버 장애 후유증으로 발생할 수 있음 (이슈 #12)
+    # 다음 세션에서 Keychain 동기화 후 재시도하면 복구 가능
+    if "http 400" in msg:
+        return RefreshError.TRANSIENT
+
+    # 서버 오류(5xx), 네트워크 오류, 타임아웃 등 → 일시적
     return RefreshError.TRANSIENT
 
 
@@ -136,84 +147,118 @@ def refresh_access_token(credential=None, credential_file=None):
 
     log("INFO", f"refresh: 갱신 시작 (source={source})")
 
-    try:
-        # OAuth 토큰 갱신 요청
-        # Claude Code 공식 OAuth 엔드포인트 및 client_id 사용
-        data = urllib.parse.urlencode({
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-        }).encode('utf-8')
+    # 요청 데이터 준비 (재시도 시에도 동일)
+    data = urllib.parse.urlencode({
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+    }).encode('utf-8')
 
-        req = urllib.request.Request(
-            "https://platform.claude.com/v1/oauth/token",
-            data=data,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent": "claude-account-manager/2.1.4",
-            },
-            method="POST",
-        )
+    last_error = None
 
-        with urllib.request.urlopen(req, timeout=10) as response:
-            if response.status == 200:
-                token_data = json.loads(response.read().decode())
-
-                # credential 업데이트
-                new_credential = credential.copy()
-                new_oauth = oauth.copy()
-
-                if "access_token" in token_data:
-                    new_oauth["accessToken"] = token_data["access_token"]
-                if "refresh_token" in token_data:
-                    new_oauth["refreshToken"] = token_data["refresh_token"]
-                if "expires_in" in token_data:
-                    # expires_in은 초 단위, expiresAt은 밀리초 타임스탬프
-                    new_oauth["expiresAt"] = int((datetime.now().timestamp() + token_data["expires_in"]) * 1000)
-
-                new_credential["claudeAiOauth"] = new_oauth
-
-                # 갱신 성공 로깅
-                new_expires = new_oauth.get("expiresAt")
-                if new_expires:
-                    new_exp_str = datetime.fromtimestamp(new_expires / 1000).strftime("%Y-%m-%d %H:%M:%S")
-                    log("INFO", f"refresh: 갱신 성공 (새 만료: {new_exp_str}, source={source})")
-
-                # 저장 위치 결정
-                if credential_file:
-                    # 파일에 저장 (저장된 계정)
-                    try:
-                        credential_file.write_text(json.dumps(new_credential, indent=2, ensure_ascii=False))
-                        os.chmod(credential_file, 0o600)
-                        return new_credential, None
-                    except Exception as e:
-                        return new_credential, f"파일 저장 실패: {e}"
-                elif from_keychain:
-                    # Keychain에 저장 (현재 로그인 계정)
-                    if set_keychain_credential(new_credential):
-                        return new_credential, None
-                    else:
-                        return new_credential, "Keychain 저장 실패"
-                else:
-                    # credential이 직접 전달됨 - 저장하지 않고 반환만
-                    return new_credential, None
-
-    except urllib.error.HTTPError as e:
-        error_body = ""
+    for attempt in range(REFRESH_MAX_RETRIES + 1):
         try:
-            error_body = e.read().decode()
-        except Exception:
-            pass
-        log("ERROR", f"refresh: HTTP {e.code}")
-        return None, f"토큰 갱신 실패 (HTTP {e.code})"
-    except urllib.error.URLError as e:
-        log("ERROR", f"refresh: 연결 오류 - {e.reason}")
-        return None, f"연결 오류: {e.reason}"
-    except Exception as e:
-        log("ERROR", f"refresh: 예외 - {e}")
-        return None, str(e)
+            req = urllib.request.Request(
+                "https://platform.claude.com/v1/oauth/token",
+                data=data,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": "claude-account-manager/2.1.4",
+                },
+                method="POST",
+            )
 
-    return None, "알 수 없는 오류"
+            with urllib.request.urlopen(req, timeout=10) as response:
+                if response.status == 200:
+                    token_data = json.loads(response.read().decode())
+
+                    # credential 업데이트
+                    new_credential = credential.copy()
+                    new_oauth = oauth.copy()
+
+                    if "access_token" in token_data:
+                        new_oauth["accessToken"] = token_data["access_token"]
+                    if "refresh_token" in token_data:
+                        new_oauth["refreshToken"] = token_data["refresh_token"]
+                    if "expires_in" in token_data:
+                        # expires_in은 초 단위, expiresAt은 밀리초 타임스탬프
+                        new_oauth["expiresAt"] = int((datetime.now().timestamp() + token_data["expires_in"]) * 1000)
+
+                    new_credential["claudeAiOauth"] = new_oauth
+
+                    # 갱신 성공 로깅
+                    new_expires = new_oauth.get("expiresAt")
+                    if new_expires:
+                        new_exp_str = datetime.fromtimestamp(new_expires / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                        retry_info = f", {attempt + 1}번째 시도" if attempt > 0 else ""
+                        log("INFO", f"refresh: 갱신 성공 (새 만료: {new_exp_str}, source={source}{retry_info})")
+
+                    # 저장 위치 결정
+                    if credential_file:
+                        # 파일에 저장 (저장된 계정)
+                        try:
+                            credential_file.write_text(json.dumps(new_credential, indent=2, ensure_ascii=False))
+                            os.chmod(credential_file, 0o600)
+                            return new_credential, None
+                        except Exception as e:
+                            return new_credential, f"파일 저장 실패: {e}"
+                    elif from_keychain:
+                        # Keychain에 저장 (현재 로그인 계정)
+                        if set_keychain_credential(new_credential):
+                            return new_credential, None
+                        else:
+                            return new_credential, "Keychain 저장 실패"
+                    else:
+                        # credential이 직접 전달됨 - 저장하지 않고 반환만
+                        return new_credential, None
+
+        except urllib.error.HTTPError as e:
+            error_body = ""
+            try:
+                error_body = e.read().decode()
+            except Exception:
+                pass
+
+            # 에러 응답에서 OAuth error type 추출 (예: invalid_grant)
+            error_type = ""
+            try:
+                err_json = json.loads(error_body)
+                error_type = err_json.get("error", "")
+            except Exception:
+                pass
+
+            if e.code >= 500 and attempt < REFRESH_MAX_RETRIES:
+                # 서버 오류(5xx) → exponential backoff 후 재시도
+                wait = REFRESH_RETRY_BACKOFF_BASE * (2 ** attempt)
+                log("WARN", f"refresh: HTTP {e.code} → {wait}초 후 재시도 ({attempt + 1}/{REFRESH_MAX_RETRIES})")
+                time.sleep(wait)
+                last_error = f"서버 오류 (HTTP {e.code})"
+                continue
+
+            # 4xx 또는 5xx 재시도 소진 → 에러 메시지에 error_type 포함하여 반환
+            error_msg = f"토큰 갱신 실패 (HTTP {e.code})"
+            if error_type:
+                error_msg = f"토큰 갱신 실패 (HTTP {e.code}: {error_type})"
+            log("ERROR", f"refresh: {error_msg}")
+            return None, error_msg
+
+        except urllib.error.URLError as e:
+            if attempt < REFRESH_MAX_RETRIES:
+                # 네트워크 오류 → 재시도
+                wait = REFRESH_RETRY_BACKOFF_BASE * (2 ** attempt)
+                log("WARN", f"refresh: 연결 오류 → {wait}초 후 재시도 ({attempt + 1}/{REFRESH_MAX_RETRIES}) - {e.reason}")
+                time.sleep(wait)
+                last_error = f"연결 오류: {e.reason}"
+                continue
+            log("ERROR", f"refresh: 연결 오류 - {e.reason}")
+            return None, f"연결 오류: {e.reason}"
+
+        except Exception as e:
+            log("ERROR", f"refresh: 예외 - {e}")
+            return None, str(e)
+
+    # 모든 재시도 소진
+    return None, last_error or "알 수 없는 오류"
 
 
 def check_token_status(credential=None, auto_refresh=True):

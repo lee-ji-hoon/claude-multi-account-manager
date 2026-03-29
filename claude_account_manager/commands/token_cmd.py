@@ -361,6 +361,35 @@ def cmd_refresh_expiring(hours=1):
     expiring_found = 0
     current = get_current_account()
 
+    # 현재 계정: Keychain → 파일 credential 동기화
+    # Claude CLI가 자체적으로 토큰을 갱신하면 Keychain만 업데이트됨
+    # account manager의 파일은 stale 상태가 됨 → 여기서 동기화 (이슈 #12)
+    if current:
+        for acc in index["accounts"]:
+            if is_same_account(acc, current):
+                credential_file = acc.get("credentialFile")
+                if credential_file:
+                    credential_path = ACCOUNTS_DIR / credential_file
+                    kc_cred = get_keychain_credential()
+                    if kc_cred and is_credential_valid(kc_cred):
+                        kc_expires = kc_cred.get("claudeAiOauth", {}).get("expiresAt", 0)
+                        try:
+                            file_cred = json.loads(credential_path.read_text())
+                            file_expires = file_cred.get("claudeAiOauth", {}).get("expiresAt", 0)
+                        except (json.JSONDecodeError, IOError, FileNotFoundError):
+                            file_expires = 0
+                        if kc_expires > file_expires:
+                            try:
+                                with open(credential_path, 'w', encoding='utf-8') as f:
+                                    f.write(json.dumps(kc_cred, indent=2, ensure_ascii=False))
+                                    f.flush()
+                                    os.fsync(f.fileno())
+                                os.chmod(credential_path, 0o600)
+                                log("INFO", f"[{acc['id']}] Keychain → 파일 credential 동기화")
+                            except Exception as e:
+                                log("WARN", f"[{acc['id']}] credential 동기화 실패: {e}")
+                break
+
     for acc in index["accounts"]:
         # 현재 계정은 스킵 (이미 활성 상태)
         if current and is_same_account(acc, current):

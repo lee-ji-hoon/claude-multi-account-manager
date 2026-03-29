@@ -67,3 +67,7 @@ RESET_HOURS = {
 # OAuth 토큰 설정
 TOKEN_VALIDITY_HOURS = 8       # 토큰 유효기간 (시간)
 TOKEN_FRESH_THRESHOLD_HOURS = 7  # 토큰 신선도 기준 (시간)
+
+# 토큰 갱신 재시도 설정 (5xx/네트워크 오류 시)
+REFRESH_MAX_RETRIES = 3             # 최대 재시도 횟수
+REFRESH_RETRY_BACKOFF_BASE = 1      # 재시도 대기 기본값 (초, exponential: 1s→2s→4s)
