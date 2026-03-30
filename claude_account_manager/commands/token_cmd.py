@@ -4,15 +4,47 @@ cmd_check, cmd_refresh_all, cmd_refresh_expiring: Token management commands
 import fcntl
 import json
 import os
+from datetime import datetime, timedelta
 
-from ..config import ACCOUNTS_DIR
+from ..config import ACCOUNTS_DIR, SOFT_BLOCK_TTL_HOURS
 from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
 from ..keychain import get_keychain_credential
-from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon, is_token_fresh, is_credential_valid, classify_refresh_error, RefreshError
+from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon, is_token_expired, is_token_fresh, is_credential_valid, classify_refresh_error, RefreshError
 from ..api import _fetch_usage_from_api
 from ..account import detect_plan_from_credential, is_same_account
 from ..logger import log, log_token_info
+
+
+def _is_soft_blocked(acc):
+    """계정이 soft-block 상태인지 확인
+
+    TTL 경과 시 자동 해제 (False 반환).
+    """
+    block = acc.get("refreshSoftBlock")
+    if not block:
+        return False
+    try:
+        until = datetime.fromisoformat(block["until"])
+        if datetime.now() >= until:
+            # TTL 경과 → 자동 해제
+            acc.pop("refreshSoftBlock", None)
+            return False
+        return True
+    except (KeyError, ValueError, TypeError):
+        acc.pop("refreshSoftBlock", None)
+        return False
+
+
+def _set_soft_block(acc, reason):
+    """영구 실패 시 soft-block 설정 (TTL 기반)"""
+    now = datetime.now()
+    acc["refreshSoftBlock"] = {
+        "until": (now + timedelta(hours=SOFT_BLOCK_TTL_HOURS)).isoformat(),
+        "reason": reason,
+        "failedAt": now.isoformat()
+    }
+    log("INFO", f"[{acc['id']}] soft-block 설정 ({SOFT_BLOCK_TTL_HOURS}시간 TTL, reason={reason})")
 
 
 def _safe_refresh_credential(credential_path, acc_id, skip_fresh_check=False):
@@ -300,6 +332,14 @@ def cmd_refresh_all():
             log("WARN", f"[{acc['id']}] credential 파일 없음: {credential_file}")
             continue
 
+        # Soft-block 확인: TTL 경과 시 자동 해제 후 1회 재시도 허용
+        if _is_soft_blocked(acc):
+            block = acc["refreshSoftBlock"]
+            log("INFO", f"[{acc['id']}] soft-block 활성 (until={block['until']}, reason={block['reason']}) → 스킵")
+            print(f"[refresh] {acc['id']}: 토큰 만료 - 해당 계정으로 재로그인 후 /account:add 필요")
+            skipped_count += 1
+            continue
+
         new_credential, error = _safe_refresh_credential(credential_path, acc["id"])
 
         if error and error.startswith("skip:"):
@@ -317,6 +357,9 @@ def cmd_refresh_all():
             continue
 
         if new_credential and not error:
+            # 갱신 성공 → soft-block 해제 (TTL 재시도로 성공한 경우)
+            acc.pop("refreshSoftBlock", None)
+
             # Plan도 갱신
             detected_plan = detect_plan_from_credential(new_credential)
             acc["plan"] = detected_plan
@@ -328,6 +371,7 @@ def cmd_refresh_all():
             is_permanent = error.startswith("permanent:")
             log("ERROR", f"[{acc['id']}] 갱신 실패 ({'영구' if is_permanent else '일시'}): {actual_error}")
             if is_permanent:
+                _set_soft_block(acc, actual_error)
                 print(f"[refresh] {acc['id']}: 토큰 만료 - 해당 계정으로 재로그인 후 /account:add 필요")
             else:
                 print(f"[refresh] {acc['id']}: 갱신 실패 - {actual_error}")
@@ -412,6 +456,16 @@ def cmd_refresh_expiring(hours=1):
         if not is_token_expiring_soon(credential, hours=hours):
             continue
 
+        # 이미 만료된 토큰은 SessionStart(cmd_refresh_all)에서 처리 → 여기선 스킵 (#14)
+        if is_token_expired(credential):
+            log("INFO", f"[{acc['id']}] 이미 만료된 토큰 → PromptSubmit에서 스킵 (SessionStart 담당)")
+            continue
+
+        # Soft-block 확인: 영구 실패한 토큰 재시도 방지 (#13)
+        if _is_soft_blocked(acc):
+            log("INFO", f"[{acc['id']}] soft-block 활성 → PromptSubmit에서 스킵")
+            continue
+
         expiring_found += 1
         log_token_info(acc["id"], credential, "만료 임박 감지 ")
 
@@ -422,6 +476,9 @@ def cmd_refresh_expiring(hours=1):
             continue
 
         if new_credential and not error:
+            # 갱신 성공 → soft-block 해제
+            acc.pop("refreshSoftBlock", None)
+
             detected_plan = detect_plan_from_credential(new_credential)
             acc["plan"] = detected_plan
 
@@ -429,9 +486,13 @@ def cmd_refresh_expiring(hours=1):
             print(f"[refresh] {acc['id']}: 만료 임박 토큰 갱신됨 [{detected_plan}]")
         elif error:
             actual_error = error[len("permanent:"):] if error.startswith("permanent:") else error
+            is_permanent = error.startswith("permanent:")
+            if is_permanent:
+                _set_soft_block(acc, actual_error)
             log("ERROR", f"[{acc['id']}] 만료 임박 갱신 실패: {actual_error}")
 
-    if refreshed_count > 0:
+    # soft-block 설정/해제 또는 갱신 성공 시 index 저장
+    if refreshed_count > 0 or any(acc.get("refreshSoftBlock") for acc in index["accounts"]):
         save_index(index)
 
     if expiring_found == 0:
