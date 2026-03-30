@@ -73,13 +73,14 @@ def cmd_add(name=None):
                 credential_path.write_text(json.dumps(credential, indent=2, ensure_ascii=False))
                 os.chmod(credential_path, 0o600)
 
-                # Plan도 자동 감지해서 갱신 + circuit breaker 해제
+                # Plan도 자동 감지해서 갱신 + soft-block 해제
                 detected_plan = detect_plan_from_credential(credential)
                 for i, a in enumerate(index["accounts"]):
                     if a["id"] == acc["id"]:
                         index["accounts"][i]["plan"] = detected_plan
                         index["accounts"][i].pop("refreshBlocked", None)
                         index["accounts"][i].pop("refreshBlockedAt", None)
+                        index["accounts"][i].pop("refreshSoftBlock", None)
                         break
                 save_index(index)
 
