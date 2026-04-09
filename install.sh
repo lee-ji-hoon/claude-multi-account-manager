@@ -90,13 +90,8 @@ with open(path, 'w') as f:
     json.dump(data, f, indent=2)
 EOF
 
-# 4. 터미널 alias 설정
+# 4. 터미널 alias 설정 (마커 기반 블록 관리)
 echo -e "  ${CYAN}[4/5]${NC} 터미널 alias 설정..."
-
-ALIAS_MAIN="alias account='python3 \"$PLUGIN_DIR/account_manager.py\"'"
-ALIAS_SWITCH="alias account-switch='python3 \"$PLUGIN_DIR/account_manager.py\" switch'"
-ALIAS_LIST="alias account-list='python3 \"$PLUGIN_DIR/account_manager.py\" list'"
-ALIAS_LAUNCH="alias cl='python3 \"$PLUGIN_DIR/bin/claude-launch\"'"
 
 # 사용자 shell 확인
 SHELL_RC=""
@@ -106,31 +101,40 @@ elif [ -n "$BASH_VERSION" ] || [ "$SHELL" = "/bin/bash" ]; then
     SHELL_RC="$HOME/.bashrc"
 fi
 
+MARKER_BEGIN="# >>> account-manager >>>"
+MARKER_END="# <<< account-manager <<<"
+
 ALIAS_ADDED=false
 if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
-    # 이전 alias 정리 (account-switch만 있던 경우)
-    if grep -q "Claude Account Manager" "$SHELL_RC" 2>/dev/null && ! grep -q "alias account=" "$SHELL_RC" 2>/dev/null; then
-        # 기존 블록 제거 후 새로 추가
-        sed -i '' '/# Claude Account Manager/,/^$/d' "$SHELL_RC" 2>/dev/null || true
-        sed -i '' '/account-switch/d' "$SHELL_RC" 2>/dev/null || true
-        sed -i '' '/account-list/d' "$SHELL_RC" 2>/dev/null || true
+    # 기존 마커 블록 또는 레거시 블록 제거
+    if grep -q "$MARKER_BEGIN" "$SHELL_RC" 2>/dev/null; then
+        sed -i '' "/$MARKER_BEGIN/,/$MARKER_END/d" "$SHELL_RC"
+    fi
+    if grep -q "# Claude Account Manager" "$SHELL_RC" 2>/dev/null; then
+        sed -i '' '/# Claude Account Manager.*터미널에서 계정 관리/d' "$SHELL_RC"
+    fi
+    if grep -q "^alias account=" "$SHELL_RC" 2>/dev/null; then
+        sed -i '' '/^alias account=/d' "$SHELL_RC"
+        sed -i '' '/^alias account-switch=/d' "$SHELL_RC"
+        sed -i '' '/^alias account-list=/d' "$SHELL_RC"
+        sed -i '' '/^alias cl=/d' "$SHELL_RC"
     fi
 
-    if ! grep -q "alias account=" "$SHELL_RC" 2>/dev/null; then
-        echo "" >> "$SHELL_RC"
-        echo "# Claude Account Manager - 터미널에서 계정 관리" >> "$SHELL_RC"
-        echo "$ALIAS_MAIN" >> "$SHELL_RC"
-        echo "$ALIAS_SWITCH" >> "$SHELL_RC"
-        echo "$ALIAS_LIST" >> "$SHELL_RC"
-        echo "$ALIAS_LAUNCH" >> "$SHELL_RC"
-        ALIAS_ADDED=true
-        echo -e "    ${GREEN}✓${NC} $SHELL_RC에 alias 추가됨"
-    else
-        echo -e "    ${DIM}이미 설정되어 있음${NC}"
-    fi
+    # 새 마커 블록 추가
+    {
+        echo ""
+        echo "$MARKER_BEGIN"
+        echo "alias account='python3 \"$PLUGIN_DIR/account_manager.py\"'"
+        echo "alias account-switch='python3 \"$PLUGIN_DIR/account_manager.py\" switch'"
+        echo "alias account-list='python3 \"$PLUGIN_DIR/account_manager.py\" list'"
+        echo "alias cl='python3 \"$PLUGIN_DIR/bin/claude-launch\"'"
+        echo "$MARKER_END"
+    } >> "$SHELL_RC"
+    ALIAS_ADDED=true
+    echo -e "    ${GREEN}✓${NC} $SHELL_RC에 alias 설정됨"
 else
     echo -e "    ${YELLOW}!${NC} shell 설정 파일을 찾을 수 없습니다"
-    echo -e "    ${DIM}수동으로 추가하세요: $ALIAS_MAIN${NC}"
+    echo -e "    ${DIM}수동으로 추가하세요: alias account='python3 \"$PLUGIN_DIR/account_manager.py\"'${NC}"
 fi
 
 # 5. 완료
