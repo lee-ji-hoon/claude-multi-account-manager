@@ -4,7 +4,7 @@ cmd_switch: Switch between accounts
 import json
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors, make_progress_bar, format_time_remaining
@@ -35,6 +35,9 @@ def cmd_switch(account_id=None):
         print("등록된 계정이 없습니다.")
         print("/account add [이름] 으로 먼저 계정을 등록하세요.")
         return False
+
+    # 대화형 선택 시 미리 가져온 사용량 데이터 (전환 후 재활용)
+    prefetched_usage = None
 
     # 인자가 없으면 대화형 선택
     if account_id is None:
@@ -142,7 +145,7 @@ def cmd_switch(account_id=None):
             elif ts == TokenStatus.ERROR:
                 print(f"      {c(Colors.YELLOW, '⚠ 연결 오류')}")
             elif real_usage:
-                now = datetime.now(real_usage["sevenDayResetAt"].tzinfo) if real_usage.get("sevenDayResetAt") else datetime.now()
+                now = datetime.now(timezone.utc)
                 if real_usage.get("fiveHour") is not None:
                     percentage = real_usage["fiveHour"]
                     bar = make_progress_bar(percentage, width=12)
@@ -192,6 +195,9 @@ def cmd_switch(account_id=None):
         except ValueError:
             # 숫자가 아니면 account_id로 시도
             account_id = choice
+
+        # 대화형 선택 시 이미 가져온 사용량 데이터를 전환 후 재사용
+        prefetched_usage = usage_map.get(account_id)
 
     # Find account
     account = None
@@ -319,35 +325,37 @@ def cmd_switch(account_id=None):
         else:
             print(f"  OAuth: {c(Colors.GREEN, '토큰 교체 완료')}")
 
-        # 전환된 계정의 사용량 표시
-        try:
-            real_usage = _fetch_usage_from_api()
-            if real_usage:
-                now = datetime.now(real_usage["sevenDayResetAt"].tzinfo) if real_usage.get("sevenDayResetAt") else datetime.now()
-                if real_usage.get("fiveHour") is not None:
-                    percentage = real_usage["fiveHour"]
-                    bar = make_progress_bar(percentage, width=12)
-                    reset_str = ""
-                    if real_usage.get("fiveHourResetAt"):
-                        remaining = real_usage["fiveHourResetAt"] - now
-                        if remaining.total_seconds() > 0:
-                            hours = int(remaining.total_seconds() // 3600)
-                            minutes = int((remaining.total_seconds() % 3600) // 60)
-                            reset_str = f" | {c(Colors.CYAN, '⏱')} {format_time_remaining(hours, minutes)}"
-                    print(f"  {c(Colors.DIM, '현재')} {bar} {percentage}%{reset_str}")
-                if real_usage.get("sevenDay") is not None:
-                    percentage = real_usage["sevenDay"]
-                    bar = make_progress_bar(percentage, width=12)
-                    reset_str = ""
-                    if real_usage.get("sevenDayResetAt"):
-                        remaining = real_usage["sevenDayResetAt"] - now
-                        if remaining.total_seconds() > 0:
-                            hours = int(remaining.total_seconds() // 3600)
-                            minutes = int((remaining.total_seconds() % 3600) // 60)
-                            reset_str = f" | {c(Colors.CYAN, '⏱')} {format_time_remaining(hours, minutes)}"
-                    print(f"  {c(Colors.DIM, '주간')} {bar} {percentage}%{reset_str}")
-        except Exception:
-            pass  # 사용량 조회 실패 시 무시 (전환 자체는 성공)
+        # 전환된 계정의 사용량 표시 (대화형에서 미리 가져온 데이터 우선 사용)
+        real_usage = prefetched_usage
+        if real_usage is None:
+            try:
+                real_usage = _fetch_usage_from_api()
+            except Exception:
+                pass  # 사용량 조회 실패 시 무시 (전환 자체는 성공)
+        if real_usage:
+            now = datetime.now(timezone.utc)
+            if real_usage.get("fiveHour") is not None:
+                percentage = real_usage["fiveHour"]
+                bar = make_progress_bar(percentage, width=12)
+                reset_str = ""
+                if real_usage.get("fiveHourResetAt"):
+                    remaining = real_usage["fiveHourResetAt"] - now
+                    if remaining.total_seconds() > 0:
+                        hours = int(remaining.total_seconds() // 3600)
+                        minutes = int((remaining.total_seconds() % 3600) // 60)
+                        reset_str = f" | {c(Colors.CYAN, '⏱')} {format_time_remaining(hours, minutes)}"
+                print(f"  {c(Colors.DIM, '현재')} {bar} {percentage}%{reset_str}")
+            if real_usage.get("sevenDay") is not None:
+                percentage = real_usage["sevenDay"]
+                bar = make_progress_bar(percentage, width=12)
+                reset_str = ""
+                if real_usage.get("sevenDayResetAt"):
+                    remaining = real_usage["sevenDayResetAt"] - now
+                    if remaining.total_seconds() > 0:
+                        hours = int(remaining.total_seconds() // 3600)
+                        minutes = int((remaining.total_seconds() % 3600) // 60)
+                        reset_str = f" | {c(Colors.CYAN, '⏱')} {format_time_remaining(hours, minutes)}"
+                print(f"  {c(Colors.DIM, '주간')} {bar} {percentage}%{reset_str}")
     else:
         print(f"  OAuth: {c(Colors.YELLOW, '토큰 없음 (재로그인 필요)')}")
         print(f"  {c(Colors.DIM, '→ /login 후 /account:add 로 credential을 저장하세요')}")
