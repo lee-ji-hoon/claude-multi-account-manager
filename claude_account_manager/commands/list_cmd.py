@@ -2,7 +2,7 @@
 cmd_list: Display registered accounts with usage visualization
 """
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors, make_progress_bar
@@ -197,7 +197,8 @@ def cmd_list():
                     print(f"      {c(Colors.DIM, '(사용량 조회 일시 실패)')}")
             elif real_usage:
                 # 실제 API 데이터 사용
-                now = datetime.now(real_usage["sevenDayResetAt"].tzinfo) if real_usage["sevenDayResetAt"] else datetime.now()
+                # API가 반환하는 resetAt은 timezone-aware(UTC)이므로 now도 aware로 생성
+                now = datetime.now(timezone.utc)
 
                 # 현재 세션 사용량 (5시간)
                 if real_usage["fiveHour"] is not None:
