@@ -3,7 +3,7 @@ cmd_switch: Switch between accounts
 """
 import json
 import os
-import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from ..config import ACCOUNTS_DIR
@@ -75,33 +75,16 @@ def cmd_switch(account_id=None):
                             pass
                 return (acc["id"], None, TokenStatus.NO_TOKEN)
 
-        # 현재 계정 먼저, 나머지 순차 (429 방지)
-        current_acc = None
-        other_accs = []
-        for acc in index["accounts"]:
-            if _is_current(acc):
-                current_acc = acc
-            else:
-                other_accs.append(acc)
-
-        if current_acc:
-            try:
-                acc_id, usage, ts = _fetch_for_account(current_acc)
-                usage_map[acc_id] = usage
-                token_status_map[acc_id] = ts
-            except Exception:
-                pass
-
-        if other_accs:
-            time.sleep(1)
-            for acc in other_accs:
+        # 계정별 사용량 병렬 조회 (각 계정은 서로 다른 토큰 사용 → rate limit 독립)
+        max_workers = min(len(index["accounts"]), 8)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for result in executor.map(_fetch_for_account, index["accounts"]):
                 try:
-                    acc_id, usage, ts = _fetch_for_account(acc)
+                    acc_id, usage, ts = result
                     usage_map[acc_id] = usage
                     token_status_map[acc_id] = ts
                 except Exception:
                     pass
-                time.sleep(1)
 
         # 계정 목록 출력
         for i, acc in enumerate(index["accounts"], 1):
