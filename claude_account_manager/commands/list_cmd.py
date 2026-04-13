@@ -2,6 +2,7 @@
 cmd_list: Display registered accounts with usage visualization
 """
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from ..config import ACCOUNTS_DIR
@@ -80,42 +81,21 @@ def cmd_list():
                             pass
                 return (acc["id"], None, TokenStatus.NO_TOKEN, None)
 
-        # 현재 계정 먼저 가져오고 (rate limit 방지), 나머지 병렬 처리
+        # 계정별 사용량 병렬 조회 (각 계정은 서로 다른 토큰 사용 → rate limit 독립)
         usage_map = {}
         token_status_map = {}
         expires_at_map = {}
 
-        current_acc = None
-        other_accs = []
-        for acc in index["accounts"]:
-            if _is_current(acc):
-                current_acc = acc
-            else:
-                other_accs.append(acc)
-
-        # 1) 현재 계정 먼저 (경합 없이)
-        if current_acc:
-            try:
-                acc_id, usage, token_status, expires_at = fetch_account_usage(current_acc)
-                usage_map[acc_id] = usage
-                token_status_map[acc_id] = token_status
-                expires_at_map[acc_id] = expires_at
-            except Exception:
-                pass
-
-        # 2) 나머지 계정 순차 처리 (429 rate limit 방지를 위해 1초 딜레이)
-        if other_accs:
-            import time
-            time.sleep(1)  # 현재 계정 호출 후 rate limit 회피
-            for acc in other_accs:
+        max_workers = min(len(index["accounts"]), 8)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for result in executor.map(fetch_account_usage, index["accounts"]):
                 try:
-                    acc_id, usage, token_status, expires_at = fetch_account_usage(acc)
+                    acc_id, usage, token_status, expires_at = result
                     usage_map[acc_id] = usage
                     token_status_map[acc_id] = token_status
                     expires_at_map[acc_id] = expires_at
                 except Exception:
                     pass
-                time.sleep(1)  # 계정 간 딜레이
 
         # 결과 출력
         for i, acc in enumerate(index["accounts"], 1):
