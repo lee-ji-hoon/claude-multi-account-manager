@@ -2,6 +2,37 @@
 from pathlib import Path
 import json, os
 
+
+def _decode_jwt_payload(token: str) -> dict:
+    """JWT 페이로드(중간 segment) base64 디코딩. 실패 시 {}."""
+    try:
+        import base64
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        pad = parts[1] + "=="
+        return json.loads(base64.urlsafe_b64decode(pad))
+    except Exception:
+        return {}
+
+
+def get_codex_auth_info(auth: dict) -> dict:
+    """access_token/id_token JWT에서 name, email, plan 추출."""
+    tokens = auth.get("tokens", {}) if auth else {}
+    info = {}
+    at = _decode_jwt_payload(tokens.get("access_token", ""))
+    it = _decode_jwt_payload(tokens.get("id_token", ""))
+
+    info["email"] = (
+        at.get("https://api.openai.com/profile", {}).get("email")
+        or it.get("email")
+        or ""
+    )
+    info["name"] = it.get("name") or info["email"].split("@")[0] if info["email"] else ""
+    raw_plan = at.get("https://api.openai.com/auth", {}).get("chatgpt_plan_type", "")
+    info["plan"] = raw_plan.capitalize() if raw_plan else "Free"
+    return info
+
 CODEX_DIR = Path.home() / ".codex"
 CODEX_AUTH_FILE = CODEX_DIR / "auth.json"
 CODEX_ACCOUNTS_DIR = CODEX_DIR / "accounts"
@@ -158,8 +189,12 @@ def add_codex_account(name: str = None) -> tuple[bool, str]:
     else:
         index = {"accounts": []}
 
+    # JWT에서 실제 name, email, plan 추출
+    info = get_codex_auth_info(auth)
     if not name:
-        name = f"codex-{short_id[:4]}"
+        name = info.get("name") or info.get("email", "").split("@")[0] or f"codex-{short_id[:4]}"
+    email = info.get("email", "")
+    plan = info.get("plan", "Free")
 
     # auth 파일 저장
     CODEX_ACCOUNTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -172,8 +207,9 @@ def add_codex_account(name: str = None) -> tuple[bool, str]:
     index["accounts"].append({
         "id": short_id,
         "name": name,
+        "email": email,
         "account_id": account_id,
-        "plan": "Pro",
+        "plan": plan,
         "added_at": now,
         "last_used": now,
     })

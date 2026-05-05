@@ -225,7 +225,7 @@ def cmd_list():
     # Codex 섹션
     from ..codex_provider import (
         is_codex_available, load_codex_index, get_current_codex_account_id,
-        get_codex_token_status, CODEX_ACCOUNTS_DIR, read_codex_auth,
+        get_codex_token_status, CODEX_ACCOUNTS_DIR, read_codex_auth, get_codex_auth_info,
     )
 
     claude_count = len(index["accounts"])
@@ -240,12 +240,26 @@ def cmd_list():
             for j, acc in enumerate(codex_accounts, claude_count + 1):
                 is_current = acc.get("account_id") == current_codex_id
                 marker = c(Colors.GREEN, "●") if is_current else " "
-                plan = acc.get("plan", "?")
+
+                # JWT에서 실시간 name/email/plan 추출 (저장된 값 fallback)
+                auth_file = CODEX_ACCOUNTS_DIR / f"auth_{acc['id']}.json"
+                auth_data = read_codex_auth(auth_file)
+                if auth_data:
+                    info = get_codex_auth_info(auth_data)
+                    display_name = info.get("name") or acc.get("name", acc["id"])
+                    display_email = info.get("email") or acc.get("email", "")
+                    plan = info.get("plan") or acc.get("plan", "?")
+                else:
+                    display_name = acc.get("name", acc["id"])
+                    display_email = acc.get("email", "")
+                    plan = acc.get("plan", "?")
+
                 plan_colors = {"Pro": Colors.CYAN, "Plus": Colors.CYAN, "Free": Colors.DIM}
                 plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
+                email_str = f" {c(Colors.DIM, f'({display_email})')}" if display_email else ""
                 status_str = c(Colors.GREEN, "활성") if is_current else ""
                 status_text = f" - {status_str}" if status_str else ""
-                print(f"  [{j}] {marker} {acc['name']} {plan_badge}{status_text}")
+                print(f"  [{j}] {marker} {display_name}{email_str} {plan_badge}{status_text}")
 
                 ts = get_codex_token_status(acc)
                 if ts == "expired":
@@ -255,17 +269,16 @@ def cmd_list():
                 elif ts == "no_auth":
                     print(f"      {c(Colors.DIM, '(인증 파일 없음)')}")
                 else:
-                    auth_file = CODEX_ACCOUNTS_DIR / f"auth_{acc['id']}.json"
-                    auth = read_codex_auth(auth_file)
-                    if auth and auth.get("last_refresh"):
+                    if auth_data and auth_data.get("last_refresh"):
                         try:
                             from datetime import timedelta as _td
-                            dt = datetime.strptime(auth["last_refresh"][:19], "%Y-%m-%dT%H:%M:%S")
+                            dt = datetime.strptime(auth_data["last_refresh"][:19], "%Y-%m-%dT%H:%M:%S")
                             expiry = dt + _td(hours=240)
                             remaining = expiry - datetime.utcnow()
                             days = int(remaining.total_seconds() // 86400)
-                            hours = int((remaining.total_seconds() % 86400) // 3600)
-                            print(f"      {c(Colors.DIM, f'토큰 🔑 {days}d {hours}h 후 만료')}")
+                            hrs = int((remaining.total_seconds() % 86400) // 3600)
+                            expire_color = Colors.YELLOW if days < 1 else Colors.DIM
+                            print(f"      {c(Colors.DIM, '토큰')} {c(expire_color, f'🔑 {days}d {hrs}h 후 만료')}")
                         except Exception:
                             pass
 
