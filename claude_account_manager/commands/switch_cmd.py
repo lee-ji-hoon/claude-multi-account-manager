@@ -15,6 +15,10 @@ from .token_cmd import _safe_refresh_credential
 from ..logger import log
 from ..account import estimate_plan, is_same_account, _is_real_org
 from ..api import _fetch_usage_from_api
+from ..codex_provider import (
+    is_codex_available, load_codex_index, get_current_codex_account_id,
+    get_codex_token_status, switch_codex_account,
+)
 
 
 def _cleanup_old_backups(backup_dir, prefix, keep=5):
@@ -152,6 +156,29 @@ def cmd_switch(account_id=None):
                             reset_str = f" | {c(Colors.CYAN, '⏱')} {hours}h {minutes}m"
                     print(f"      {c(Colors.DIM, '주간')} {bar} {percentage}%{reset_str}")
 
+        # Codex 섹션
+        claude_count = len(index["accounts"])
+        codex_accounts = []
+        if is_codex_available():
+            codex_index = load_codex_index()
+            codex_accounts = codex_index.get("accounts", [])
+            if codex_accounts:
+                current_codex_id = get_current_codex_account_id()
+                print()
+                print(f"  {c(Colors.DIM, 'Codex')}")
+                for j, acc in enumerate(codex_accounts, claude_count + 1):
+                    is_current_codex = acc.get("account_id") == current_codex_id
+                    marker = c(Colors.GREEN, "●") if is_current_codex else " "
+                    plan = acc.get("plan", "?")
+                    plan_colors = {"Pro": Colors.CYAN, "Plus": Colors.CYAN, "Free": Colors.DIM}
+                    plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
+                    ts = get_codex_token_status(acc)
+                    token_warn = (
+                        f" {c(Colors.RED, '⚠만료')}" if ts == "expired"
+                        else (f" {c(Colors.YELLOW, '⚠곧만료')}" if ts == "expiring" else "")
+                    )
+                    print(f"  [{j}] {marker} {acc['name']} {plan_badge}{token_warn}")
+
         print(c(Colors.DIM, "  " + "─" * 55))
 
         print(f"  {c(Colors.DIM, '번호를 입력하세요 (취소: q)')}: ", end="", flush=True)
@@ -170,8 +197,24 @@ def cmd_switch(account_id=None):
 
         try:
             idx = int(choice) - 1
-            if 0 <= idx < len(index["accounts"]):
+            total_count = claude_count + len(codex_accounts)
+            if 0 <= idx < claude_count:
                 account_id = index["accounts"][idx]["id"]
+            elif claude_count <= idx < total_count:
+                codex_acc = codex_accounts[idx - claude_count]
+                ok, result = switch_codex_account(codex_acc)
+                plan = codex_acc.get("plan", "?")
+                plan_colors = {"Pro": Colors.CYAN, "Plus": Colors.CYAN, "Free": Colors.DIM}
+                plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
+                print()
+                if ok:
+                    print(c(Colors.GREEN, f"  계정 전환 완료: {codex_acc['name']} {plan_badge}"))
+                    print(c(Colors.DIM, "  " + "─" * 40))
+                    print(c(Colors.YELLOW, "  Codex를 재시작해야 변경사항이 적용됩니다."))
+                else:
+                    print(c(Colors.RED, f"  전환 실패: {result}"))
+                print()
+                return ok
             else:
                 print(f"잘못된 번호입니다: {choice}")
                 return False
