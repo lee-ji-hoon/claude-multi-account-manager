@@ -222,6 +222,53 @@ def cmd_list():
                             expire_str = f"{hours}h {minutes}m"
                         print(f"      {c(Colors.DIM, '토큰')} {c(expire_color, f'🔑 {expire_str} 후 만료')}")
 
+    # Codex 섹션
+    from ..codex_provider import (
+        is_codex_available, load_codex_index, get_current_codex_account_id,
+        get_codex_token_status, CODEX_ACCOUNTS_DIR, read_codex_auth,
+    )
+
+    claude_count = len(index["accounts"])
+
+    if is_codex_available():
+        codex_index = load_codex_index()
+        codex_accounts = codex_index.get("accounts", [])
+        if codex_accounts:
+            current_codex_id = get_current_codex_account_id()
+            print()
+            print(f"  {c(Colors.DIM, 'Codex')}")
+            for j, acc in enumerate(codex_accounts, claude_count + 1):
+                is_current = acc.get("account_id") == current_codex_id
+                marker = c(Colors.GREEN, "●") if is_current else " "
+                plan = acc.get("plan", "?")
+                plan_colors = {"Pro": Colors.CYAN, "Plus": Colors.CYAN, "Free": Colors.DIM}
+                plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
+                status_str = c(Colors.GREEN, "활성") if is_current else ""
+                status_text = f" - {status_str}" if status_str else ""
+                print(f"  [{j}] {marker} {acc['name']} {plan_badge}{status_text}")
+
+                ts = get_codex_token_status(acc)
+                if ts == "expired":
+                    print(f"      {c(Colors.RED, '⚠ 토큰 만료')} - {c(Colors.YELLOW, 'codex login 필요')}")
+                elif ts == "expiring":
+                    print(f"      {c(Colors.YELLOW, '⚠ 24시간 내 만료')}")
+                elif ts == "no_auth":
+                    print(f"      {c(Colors.DIM, '(인증 파일 없음)')}")
+                else:
+                    auth_file = CODEX_ACCOUNTS_DIR / f"auth_{acc['id']}.json"
+                    auth = read_codex_auth(auth_file)
+                    if auth and auth.get("last_refresh"):
+                        try:
+                            from datetime import timedelta as _td
+                            dt = datetime.strptime(auth["last_refresh"][:19], "%Y-%m-%dT%H:%M:%S")
+                            expiry = dt + _td(hours=240)
+                            remaining = expiry - datetime.utcnow()
+                            days = int(remaining.total_seconds() // 86400)
+                            hours = int((remaining.total_seconds() % 86400) // 3600)
+                            print(f"      {c(Colors.DIM, f'토큰 🔑 {days}d {hours}h 후 만료')}")
+                        except Exception:
+                            pass
+
     print(c(Colors.DIM, "  " + "─" * 55))
 
     if not current_email:
