@@ -132,6 +132,61 @@ def switch_codex_account(acc: dict) -> tuple[bool, str]:
     return False, "auth.json 쓰기 실패"
 
 
+def add_codex_account(name: str = None) -> tuple[bool, str]:
+    """현재 ~/.codex/auth.json을 Codex 계정으로 저장"""
+    import hashlib
+    from datetime import datetime
+
+    auth = read_codex_auth()
+    if not auth:
+        return False, "~/.codex/auth.json 없음 — codex login 먼저 실행하세요"
+
+    tokens = auth.get("tokens", {})
+    account_id = tokens.get("account_id")
+    if not account_id:
+        return False, "auth.json에 account_id가 없습니다"
+
+    # 8자리 단축 ID (account_id 해시)
+    short_id = hashlib.md5(account_id.encode()).hexdigest()[:8]
+
+    # 중복 확인
+    if is_codex_available():
+        index = load_codex_index()
+        for acc in index.get("accounts", []):
+            if acc.get("account_id") == account_id:
+                return False, f"이미 등록된 계정입니다: {acc['name']} (id: {acc['id']})"
+    else:
+        index = {"accounts": []}
+
+    if not name:
+        name = f"codex-{short_id[:4]}"
+
+    # auth 파일 저장
+    CODEX_ACCOUNTS_DIR.mkdir(parents=True, exist_ok=True)
+    auth_file = CODEX_ACCOUNTS_DIR / f"auth_{short_id}.json"
+    if not write_codex_auth(auth, auth_file):
+        return False, "auth 파일 저장 실패"
+
+    # index 업데이트
+    now = datetime.now().isoformat()
+    index["accounts"].append({
+        "id": short_id,
+        "name": name,
+        "account_id": account_id,
+        "plan": "Pro",
+        "added_at": now,
+        "last_used": now,
+    })
+    try:
+        tmp = CODEX_INDEX_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(index, indent=2, ensure_ascii=False))
+        tmp.rename(CODEX_INDEX_FILE)
+    except Exception as e:
+        return False, f"index 저장 실패: {e}"
+
+    return True, f"{name} (id: {short_id})"
+
+
 def remove_codex_account(acc: dict) -> tuple[bool, str]:
     """저장된 Codex 계정 삭제"""
     # auth 파일 삭제
