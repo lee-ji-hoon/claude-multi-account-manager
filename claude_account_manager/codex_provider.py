@@ -163,6 +163,33 @@ def switch_codex_account(acc: dict) -> tuple[bool, str]:
     return False, "auth.json 쓰기 실패"
 
 
+def fetch_codex_usage(auth: dict) -> dict | None:
+    """
+    /backend-api/codex/usage 호출. ChatGPT-Account-Id 헤더 필요.
+    반환: rate_limit 딕셔너리 또는 None
+    """
+    import urllib.request, urllib.error
+    tokens = auth.get("tokens", {}) if auth else {}
+    access_token = tokens.get("access_token", "")
+    if not access_token:
+        return None
+    at = _decode_jwt_payload(access_token)
+    account_id = at.get("https://api.openai.com/auth", {}).get("chatgpt_account_id", "")
+    try:
+        req = urllib.request.Request(
+            "https://chatgpt.com/backend-api/codex/usage",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "ChatGPT-Account-Id": account_id,
+                "User-Agent": "codex-cli/0.128.0",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return None
+
+
 def add_codex_account(name: str = None) -> tuple[bool, str]:
     """현재 ~/.codex/auth.json을 Codex 계정으로 저장"""
     import hashlib
