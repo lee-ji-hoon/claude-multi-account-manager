@@ -15,7 +15,33 @@ from ..token import is_credential_valid
 
 
 def cmd_add(name=None):
-    """현재 계정을 프로필로 저장"""
+    """현재 계정을 프로필로 저장 (Claude 또는 Codex 선택)"""
+    from ..codex_provider import is_codex_available, add_codex_account
+
+    if is_codex_available():
+        print()
+        print(c(Colors.BOLD, "  어떤 계정을 추가할까요?"))
+        print(c(Colors.DIM, "  " + "─" * 40))
+        print("  [1] Claude  (현재 Claude Code 로그인)")
+        print("  [2] Codex   (현재 ~/.codex/auth.json)")
+        print(c(Colors.DIM, "  " + "─" * 40))
+        print(f"  {c(Colors.DIM, '번호를 입력하세요 (기본: 1)')}: ", end="", flush=True)
+        try:
+            choice = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            print("취소됨")
+            return False
+        if choice == "2":
+            ok, msg = add_codex_account(name)
+            print()
+            if ok:
+                print(c(Colors.GREEN, f"  ✓ Codex 계정 저장됨: {msg}"))
+            else:
+                print(c(Colors.RED, f"  ✗ {msg}"))
+            print()
+            return ok
+
     current = get_current_account()
     if not current:
         print("현재 로그인된 계정이 없습니다. 먼저 /login 하세요.")
