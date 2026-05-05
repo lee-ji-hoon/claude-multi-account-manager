@@ -115,8 +115,20 @@ def cmd_list():
                 marker = " "
                 status = ""
 
-            # Plan 정보 가져오기
-            if "plan" in acc:
+            # Plan 정보 가져오기 — API planName 우선 (stale 방지)
+            real_usage = usage_map.get(acc["id"])
+            api_plan = real_usage.get("planName") if real_usage else None
+            if api_plan:
+                plan = api_plan
+                # 저장된 플랜과 다르면 index 자동 업데이트
+                if acc.get("plan") != api_plan:
+                    acc["plan"] = api_plan
+                    try:
+                        from ..storage import save_index
+                        save_index(index)
+                    except Exception:
+                        pass
+            elif "plan" in acc:
                 plan = acc["plan"]
             elif is_current:
                 plan = current_plan
@@ -150,7 +162,6 @@ def cmd_list():
             print(f"      {c(Colors.DIM, acc['email'])}")
 
             # 사용량 표시 (미리 가져온 데이터 사용)
-            real_usage = usage_map.get(acc["id"])
             token_status = token_status_map.get(acc["id"], TokenStatus.NO_TOKEN)
             expires_at = expires_at_map.get(acc["id"])
 
@@ -226,7 +237,29 @@ def cmd_list():
     from ..codex_provider import (
         is_codex_available, load_codex_index, get_current_codex_account_id,
         get_codex_token_status, CODEX_ACCOUNTS_DIR, read_codex_auth, get_codex_auth_info,
+        fetch_codex_usage,
     )
+
+    def _fmt_seconds(secs):
+        secs = int(secs)
+        if secs <= 0:
+            return "곧"
+        d = secs // 86400
+        h = (secs % 86400) // 3600
+        m = (secs % 3600) // 60
+        if d > 0:
+            return f"{d}d {h}h"
+        if h > 0:
+            return f"{h}h {m}m"
+        return f"{m}m"
+
+    def _print_codex_rate_window(label, window):
+        pct = window.get("used_percent", 0)
+        reset = window.get("reset_after_seconds", 0)
+        bar = make_progress_bar(pct)
+        color = Colors.RED if pct >= 95 else Colors.YELLOW if pct >= 80 else Colors.GREEN
+        reset_str = _fmt_seconds(reset)
+        print(f"      {c(Colors.DIM, label):<6} {bar} {c(color, f'{pct}%')} | ⏱ {reset_str}")
 
     claude_count = len(index["accounts"])
 
@@ -260,6 +293,27 @@ def cmd_list():
                 status_str = c(Colors.GREEN, "활성") if is_current else ""
                 status_text = f" - {status_str}" if status_str else ""
                 print(f"  [{j}] {marker} {display_name}{email_str} {plan_badge}{status_text}")
+
+                # 사용량 조회 (auth_data 있는 경우)
+                usage_data = fetch_codex_usage(auth_data) if auth_data else None
+                if usage_data:
+                    rl = usage_data.get("rate_limit", {})
+                    pw = rl.get("primary_window")
+                    sw = rl.get("secondary_window")
+                    if pw:
+                        _print_codex_rate_window("5h", pw)
+                    if sw:
+                        _print_codex_rate_window("주간", sw)
+                    for extra in usage_data.get("additional_rate_limits", []):
+                        short_name = extra.get("limit_name", "")
+                        short_name = short_name.replace("GPT-5.3-Codex-", "").replace("GPT-5-Codex-", "")
+                        erl = extra.get("rate_limit", {})
+                        epw = erl.get("primary_window")
+                        esw = erl.get("secondary_window")
+                        if epw:
+                            _print_codex_rate_window(f"{short_name} 5h", epw)
+                        if esw:
+                            _print_codex_rate_window(f"{short_name} 주간", esw)
 
                 ts = get_codex_token_status(acc)
                 if ts == "expired":
