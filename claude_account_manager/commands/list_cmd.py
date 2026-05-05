@@ -253,13 +253,26 @@ def cmd_list():
             return f"{h}h {m}m"
         return f"{m}m"
 
-    def _print_codex_rate_window(label, window):
-        pct = window.get("used_percent", 0)
-        reset = window.get("reset_after_seconds", 0)
-        bar = make_progress_bar(pct)
-        color = Colors.RED if pct >= 95 else Colors.YELLOW if pct >= 80 else Colors.GREEN
-        reset_str = _fmt_seconds(reset)
-        print(f"      {c(Colors.DIM, label):<6} {bar} {c(color, f'{pct}%')} | ⏱ {reset_str}")
+    def _disp_len(s):
+        import unicodedata
+        return sum(2 if unicodedata.east_asian_width(ch) in ('W', 'F') else 1 for ch in s)
+
+    def _pad_label(s, width):
+        return s + ' ' * max(0, width - _disp_len(s))
+
+    def _print_codex_usage_rows(rows):
+        """rows: list of (label, window_dict). 레이블 너비 자동 정렬."""
+        if not rows:
+            return
+        max_w = max(_disp_len(label) for label, _ in rows)
+        for label, window in rows:
+            pct = window.get("used_percent", 0)
+            reset = window.get("reset_after_seconds", 0)
+            bar = make_progress_bar(pct)
+            color = Colors.RED if pct >= 95 else Colors.YELLOW if pct >= 80 else Colors.GREEN
+            reset_str = _fmt_seconds(reset)
+            padded = _pad_label(label, max_w)
+            print(f"      {c(Colors.DIM, padded)} {bar} {c(color, f'{pct}%')} | ⏱ {reset_str}")
 
     claude_count = len(index["accounts"])
 
@@ -294,16 +307,17 @@ def cmd_list():
                 status_text = f" - {status_str}" if status_str else ""
                 print(f"  [{j}] {marker} {display_name}{email_str} {plan_badge}{status_text}")
 
-                # 사용량 조회 (auth_data 있는 경우)
+                # 사용량 조회 (auth_data 있는 경우) — 레이블 모아서 한번에 정렬 출력
                 usage_data = fetch_codex_usage(auth_data) if auth_data else None
                 if usage_data:
+                    rows = []
                     rl = usage_data.get("rate_limit", {})
                     pw = rl.get("primary_window")
                     sw = rl.get("secondary_window")
                     if pw:
-                        _print_codex_rate_window("5h", pw)
+                        rows.append(("5h", pw))
                     if sw:
-                        _print_codex_rate_window("주간", sw)
+                        rows.append(("주간", sw))
                     for extra in usage_data.get("additional_rate_limits", []):
                         short_name = extra.get("limit_name", "")
                         short_name = short_name.replace("GPT-5.3-Codex-", "").replace("GPT-5-Codex-", "")
@@ -311,9 +325,10 @@ def cmd_list():
                         epw = erl.get("primary_window")
                         esw = erl.get("secondary_window")
                         if epw:
-                            _print_codex_rate_window(f"{short_name} 5h", epw)
+                            rows.append((f"{short_name} 5h", epw))
                         if esw:
-                            _print_codex_rate_window(f"{short_name} 주간", esw)
+                            rows.append((f"{short_name} 주간", esw))
+                    _print_codex_usage_rows(rows)
 
                 ts = get_codex_token_status(acc)
                 if ts == "expired":
