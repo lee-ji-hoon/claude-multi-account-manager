@@ -158,6 +158,27 @@ def is_same_account(acc, current_oauth):
     return not current_org
 
 
+def generate_long_lived_account_id(email):
+    """long-lived 토큰 계정용 id 생성
+
+    기본: {email_base}_token
+    동일 id가 이미 있으면 _token_2, _token_3 ...
+    """
+    base = email.split("@")[0].replace(".", "_").replace("+", "_").lower()
+    existing_ids = {acc.get("id") for acc in load_index().get("accounts", [])}
+
+    candidate = f"{base}_token"
+    if candidate not in existing_ids:
+        return candidate
+
+    n = 2
+    while True:
+        candidate = f"{base}_token_{n}"
+        if candidate not in existing_ids:
+            return candidate
+        n += 1
+
+
 def get_org_info(oauth_account):
     """oauthAccount에서 organization 정보 추출
 

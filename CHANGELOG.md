@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.0] - 2026-05-13
+
+### Added
+- **Long-lived OAuth token 지원** — `claude setup-token`이 발급하는 1년 유효 토큰을 일반 계정과 동일하게 등록·전환·관리
+  - `/account:add` 진입 시 `[2] Long-lived 토큰 등록` 선택지 추가
+  - `/account:export-token <id>` 명령 신설 — `export CLAUDE_CODE_OAUTH_TOKEN='...'` stdout 출력
+  - `/account:switch --shell-export` 플래그 — long-lived 활성화 시 env 라인 자동 emit, 일반 OAuth로 복귀 시 `unset` 라인 emit
+  - `list` / `switch` UI에 `[CI]` 배지 + D-day 만료 표시 (inference-only scope라 usage API skip)
+  - SessionStart hook이 D-7 이내 만료 임박 long-lived 토큰 stderr 경고
+  - `refresh-all` / `refresh-expiring` / `check`가 `tokenType=="long-lived"` 계정 자동 skip
+- zsh wrapper v4 — `account switch <id>` 와 `account-switch <id>` 둘 다 `CLAUDE_CODE_OAUTH_TOKEN` env 자동 동기화 (분기 로직을 `_account_mgr_run` 한 곳으로 통합)
+
+### Fixed
+- `switch --shell-export`가 동일 계정 재선택 시에도 env 라인 출력 (새 셸 첫 활성화 시 env 동기화 보장)
+- `switch` 대화형 선택 UI가 long-lived 토큰으로 `/api/oauth/usage` 호출하여 INVALID 표시되던 회귀
+
+### Documentation
+- README.md / README.ko.md에 "Long-lived OAuth Token (CI/Scripts)" 섹션 추가
+- `docs/superpowers/specs/` 및 `docs/superpowers/plans/` 에 설계·구현 문서 보관
+- `scripts/poc_long_lived.sh` POC 검증 스크립트
+
 ## [0.1.0] - 2026-02-01
 
 ### What's changed

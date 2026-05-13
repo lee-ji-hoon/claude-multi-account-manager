@@ -1,6 +1,7 @@
 """
-cmd_add, cmd_auto_add: Add/register accounts
+cmd_add, cmd_auto_add, cmd_add_long_lived: Add/register accounts
 """
+import getpass
 import json
 import os
 import sys
@@ -10,20 +11,30 @@ from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
 from ..keychain import get_keychain_credential
-from ..account import detect_plan_from_credential, generate_account_name, generate_account_id, is_account_duplicate, get_org_info, _is_real_org
+from ..account import (
+    detect_plan_from_credential,
+    generate_account_name,
+    generate_account_id,
+    generate_long_lived_account_id,
+    is_account_duplicate,
+    get_org_info,
+    _is_real_org,
+)
+from ..long_lived import validate_token_format, wrap_long_lived_token
 from ..token import is_credential_valid
 
 
 def cmd_add(name=None):
-    """현재 계정을 프로필로 저장 (Claude 또는 Codex 선택)"""
+    """현재 계정을 프로필로 저장 (Claude OAuth / Long-lived / Codex 선택)"""
     from ..codex_provider import is_codex_available, add_codex_account
 
     if is_codex_available():
         print()
         print(c(Colors.BOLD, "  어떤 계정을 추가할까요?"))
         print(c(Colors.DIM, "  " + "─" * 40))
-        print("  [1] Claude  (현재 Claude Code 로그인)")
-        print("  [2] Codex   (현재 ~/.codex/auth.json)")
+        print("  [1] Claude OAuth (현재 Claude Code 로그인)")
+        print("  [2] Codex        (현재 ~/.codex/auth.json)")
+        print("  [3] Long-lived 토큰 (CI/스크립트용, 1년)")
         print(c(Colors.DIM, "  " + "─" * 40))
         print(f"  {c(Colors.DIM, '번호를 입력하세요 (기본: 1)')}: ", end="", flush=True)
         try:
@@ -41,6 +52,24 @@ def cmd_add(name=None):
                 print(c(Colors.RED, f"  ✗ {msg}"))
             print()
             return ok
+        if choice == "3":
+            return cmd_add_long_lived()
+    else:
+        # Codex가 없는 환경 → Claude OAuth vs Long-lived 토큰 선택
+        print()
+        print(c(Colors.BOLD, "  계정 등록 유형 선택"))
+        print(c(Colors.DIM, "  " + "─" * 40))
+        print(f"  [1] 현재 로그인된 OAuth 계정 저장 (기본)")
+        print(f"  [2] Long-lived 토큰 등록 (CI/스크립트용, 1년 유효)")
+        print(c(Colors.DIM, "  " + "─" * 40))
+        try:
+            type_choice = input(f"  {c(Colors.DIM, '번호 (기본: 1)')}: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            print("취소됨")
+            return False
+        if type_choice == "2":
+            return cmd_add_long_lived()
 
     current = get_current_account()
     if not current:
@@ -305,4 +334,135 @@ def cmd_auto_add():
     # 9. 성공 메시지
     org_suffix = f" @{org_name}" if _is_real_org(org_name) else ""
     print(f"[auto-add] 계정 등록됨: {name} ({email}{org_suffix}) [{plan}]")
+    return True
+
+
+def cmd_add_long_lived():
+    """Long-lived 토큰(claude setup-token 발급) 등록
+
+    토큰을 paste 입력받고, email/name/plan은 수동 입력.
+    """
+    print()
+    print(c(Colors.BOLD, "  Long-lived 토큰 등록"))
+    print(c(Colors.DIM, "  " + "─" * 40))
+    print(c(Colors.DIM, "  발급 방법:"))
+    print(c(Colors.DIM, "    터미널에서 `claude setup-token` 실행"))
+    print(c(Colors.DIM, "    OAuth 후 출력되는 토큰을 복사하여 아래에 paste"))
+    print()
+
+    try:
+        token = getpass.getpass("  토큰 paste (입력 숨김): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        print("취소됨")
+        return False
+
+    if not validate_token_format(token):
+        print(c(Colors.RED, "  토큰 포맷이 올바르지 않습니다 (sk-ant- prefix 아님)"))
+        return False
+
+    try:
+        email = input("  이메일: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        print("취소됨")
+        return False
+
+    if not email or "@" not in email:
+        print(c(Colors.RED, "  유효한 이메일이 필요합니다"))
+        return False
+
+    default_name = email.split("@")[0]
+    try:
+        name = input(f"  계정 이름 (기본: {default_name}): ").strip() or default_name
+    except (EOFError, KeyboardInterrupt):
+        print()
+        print("취소됨")
+        return False
+
+    print()
+    print(c(Colors.BOLD, "  Plan 선택"))
+    plans = ["Free", "Pro", "Team", "Max5", "Max20"]
+    for i, p in enumerate(plans, 1):
+        print(f"    [{i}] {p}")
+    try:
+        choice = input("  번호 (기본: 1): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        print("취소됨")
+        return False
+
+    plan = "Free"
+    if choice:
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(plans):
+                plan = plans[idx]
+        except ValueError:
+            pass
+
+    index = load_index()
+    for acc in index["accounts"]:
+        if acc.get("tokenType") != "long-lived":
+            continue
+        cred_file = acc.get("credentialFile")
+        if not cred_file:
+            continue
+        cred_path = ACCOUNTS_DIR / cred_file
+        if not cred_path.exists():
+            continue
+        try:
+            existing = json.loads(cred_path.read_text())
+            if existing.get("claudeAiOauth", {}).get("accessToken") == token:
+                print(c(Colors.YELLOW,
+                        f"  이 토큰은 이미 등록되어 있습니다: {acc['id']} ({acc['name']})"))
+                return False
+        except (json.JSONDecodeError, IOError):
+            continue
+
+    account_id = generate_long_lived_account_id(email)
+
+    wrapped = wrap_long_lived_token(token, plan)
+    credential_file = f"credential_{account_id}.json"
+    credential_path = ACCOUNTS_DIR / credential_file
+    credential_path.write_text(json.dumps(wrapped, indent=2, ensure_ascii=False))
+    os.chmod(credential_path, 0o600)
+
+    profile = {
+        "emailAddress": email,
+        "displayName": name,
+    }
+    profile_file = f"profile_{account_id}.json"
+    profile_path = ACCOUNTS_DIR / profile_file
+    profile_path.write_text(json.dumps(profile, indent=2, ensure_ascii=False))
+    os.chmod(profile_path, 0o600)
+
+    now_iso = datetime.now().isoformat()
+    index["accounts"].append({
+        "id": account_id,
+        "name": name,
+        "email": email,
+        "plan": plan,
+        "tokenType": "long-lived",
+        "tokenIssuedAt": now_iso,
+        "profileFile": profile_file,
+        "credentialFile": credential_file,
+        "createdAt": now_iso,
+    })
+    save_index(index)
+
+    expires_ms = wrapped["claudeAiOauth"]["expiresAt"]
+    expires_str = datetime.fromtimestamp(expires_ms / 1000).strftime("%Y-%m-%d")
+
+    print()
+    print(c(Colors.GREEN, "  Long-lived 토큰 등록 완료"))
+    print(c(Colors.DIM, "  " + "─" * 40))
+    print(f"  ID: {account_id}")
+    print(f"  이름: {name}")
+    print(f"  이메일: {email}")
+    print(f"  Plan: {plan}")
+    print(f"  Type: Long-lived")
+    print(f"  만료: {expires_str} (1년)")
+    print()
+    print(c(Colors.DIM, f"  활성화: account:switch {account_id}"))
     return True

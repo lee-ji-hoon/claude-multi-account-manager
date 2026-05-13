@@ -33,3 +33,4 @@ python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" switch $ARGUMENTS
 - After switching, Claude Code must be restarted for changes to take effect
 - OAuth token is automatically replaced
 - Different Team accounts with the same email can be switched individually
+- When switching to a long-lived (CI) account, `CLAUDE_CODE_OAUTH_TOKEN` is auto-exported by the `account-switch` zsh function wrapper. Switching back to a normal OAuth account `unset`s it. Requires the v3 zshrc block (installed by SessionStart hook).
