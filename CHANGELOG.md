@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.1] - 2026-05-13
+
+### Removed
+- **v2.5.0의 Long-lived OAuth token 지원 전면 revert** — `claude setup-token`이 발급하는 토큰은 `user:inference` scope만 가지고 `user:sessions:claude_code` scope가 없어 **인터랙티브 Claude Code 세션을 시작할 수 없음** (Anthropic 정책상 제한). 등록·switch는 가능하지만 활성화 시 "Not logged in" 표시되어 실용성 없음.
+- 제거된 항목:
+  - `/account:add`의 Long-lived 분기, `cmd_add_long_lived` 함수
+  - `/account:export-token` 명령
+  - `/account:switch --shell-export` 플래그, `build_shell_export_lines` 함수
+  - `list` / `switch` UI의 `[CI]` 배지 + D-day 표시
+  - SessionStart hook의 long-lived 만료 임박 경고
+  - `refresh-all` / `refresh-expiring` / `check`의 long-lived skip 분기
+  - zsh wrapper v4 → v2 (Codex 시점 기본)
+  - `claude_account_manager/long_lived.py`, `commands/export_token_cmd.py`, 관련 테스트 5개
+
+### Note
+CI/스크립트 환경에서 `claude -p "..."` 같은 비인터랙티브 호출이 필요하면 그대로 `CLAUDE_CODE_OAUTH_TOKEN` 환경변수를 export하여 사용 가능 (이 플러그인 외부에서 직접 관리).
+
 ## [2.5.0] - 2026-05-13
 
 ### Added

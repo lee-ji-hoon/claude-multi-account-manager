@@ -41,7 +41,6 @@ claude plugin install account@lee-ji-hoon
 | `/account:logs` | 토큰 갱신 로그 확인 |
 | `/account:repair` | 설치 문제 진단 및 수리 |
 | `/account:report` | 버그 리포트 GitHub Issue 자동 생성 |
-| `/account:export-token [id]` | CI/스크립트용 `export CLAUDE_CODE_OAUTH_TOKEN='...'` 출력 |
 
 ## 사용 예시
 
@@ -62,32 +61,6 @@ claude plugin install account@lee-ji-hoon
       토큰 🔑 3h 42m 후 만료
   ───────────────────────────────────────────────────────
 ```
-
-## Long-lived OAuth 토큰 (CI / 스크립트용)
-
-브라우저 OAuth가 불가능한 CI 파이프라인이나 스크립트 환경을 위해, `claude setup-token`이 발급하는 1년 유효 토큰을 등록할 수 있습니다.
-
-### 발급 + 등록
-
-```bash
-claude setup-token                 # 브라우저 OAuth → 토큰이 stdout으로 출력 (복사)
-/account:add                       # [2] Long-lived 토큰 등록 선택 → paste
-```
-
-### 활성화
-
-```bash
-account-switch <id>                # zsh function wrapper가 CLAUDE_CODE_OAUTH_TOKEN 자동 export
-# 또는 명시적으로:
-account-export-token <id>          # 같은 효과
-```
-
-### 주의사항
-
-- Long-lived 토큰은 **refresh token이 없어** 1년마다 재발급 필요 (D-7 만료 임박 시 SessionStart에서 경고).
-- **inference-only scope**: `/api/oauth/usage` 등 메타 API는 403 — `list`/`switch`는 progressbar 없이 `D-day`만 표시.
-- `ANTHROPIC_API_KEY` 환경변수가 set돼 있으면 그게 `CLAUDE_CODE_OAUTH_TOKEN`보다 우선 → OAuth 토큰 쓰려면 같이 unset 필요.
-- `--bare` 모드는 `CLAUDE_CODE_OAUTH_TOKEN`을 읽지 않음 → `ANTHROPIC_API_KEY` 사용 필요.
 
 ## 동작 원리
 

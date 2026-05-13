@@ -35,4 +35,3 @@ python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" add $ARGUMENTS
 - Plan is auto-detected from the credential (rateLimitTier, subscriptionType)
 - If the name is omitted, it is auto-generated from displayName or email
 - Even with the same email, different Team/Organization accounts are registered separately
-- The add prompt first asks: `[1] Save current OAuth account` or `[2] Register long-lived token` (CI/script use, 1-year). Long-lived tokens come from `claude setup-token` and are pasted via `getpass` (echo off).
