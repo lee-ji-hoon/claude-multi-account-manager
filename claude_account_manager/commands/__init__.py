@@ -8,14 +8,13 @@ from .add_cmd import cmd_add, cmd_auto_add
 from .switch_cmd import cmd_switch
 from .remove_cmd import cmd_remove
 from .token_cmd import cmd_check, cmd_refresh_all, cmd_refresh_expiring
-from .misc_cmd import cmd_current, cmd_rename, cmd_set_plan, cmd_setup_hook, cmd_update, cmd_version, cmd_help, cmd_warn_expiring_long_lived
+from .misc_cmd import cmd_current, cmd_rename, cmd_set_plan, cmd_setup_hook, cmd_update, cmd_version, cmd_help
 from .import_cmd import cmd_import
 from .export_cmd import cmd_export_for_import
 from .push_cmd import cmd_push
 from .pull_cmd import cmd_pull
 from .launch_cmd import cmd_launch
 from .logs_cmd import cmd_logs
-from .export_token_cmd import cmd_export_token
 
 
 def main():
@@ -46,16 +45,8 @@ def main():
         extra = args[1:] if len(args) > 1 else None
         cmd_launch(extra)
     elif args[0] == "switch":
-        rest = args[1:]
-        shell_export = False
-        positional = []
-        for arg in rest:
-            if arg == "--shell-export":
-                shell_export = True
-            else:
-                positional.append(arg)
-        account_id = positional[0] if positional else None
-        cmd_switch(account_id, shell_export=shell_export)
+        account_id = args[1] if len(args) > 1 else None
+        cmd_switch(account_id)
     elif args[0] in ("remove", "rm", "delete"):
         account_id = args[1] if len(args) > 1 else None
         cmd_remove(account_id)
@@ -86,9 +77,6 @@ def main():
         if count > 0:
             print(f"만료 임박 토큰 갱신: {count}개")
         sys.exit(0)
-    elif args[0] == "warn-expiring-long-lived":
-        cmd_warn_expiring_long_lived()
-        sys.exit(0)
     elif args[0] == "setup-hook":
         cmd_setup_hook()
     elif args[0] == "logs":
@@ -96,9 +84,6 @@ def main():
         cmd_logs(subcommand)
     elif args[0] == "check":
         cmd_check()
-    elif args[0] == "export-token":
-        account_id = args[1] if len(args) > 1 else None
-        cmd_export_token(account_id)
     elif args[0] == "update":
         cmd_update()
     elif args[0] == "current":
@@ -133,5 +118,4 @@ __all__ = [
     "cmd_update",
     "cmd_version",
     "cmd_help",
-    "cmd_export_token",
 ]

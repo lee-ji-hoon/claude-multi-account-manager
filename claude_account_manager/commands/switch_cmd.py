@@ -15,23 +15,11 @@ from .token_cmd import _safe_refresh_credential
 from ..logger import log
 from ..account import estimate_plan, is_same_account, _is_real_org
 from ..api import _fetch_usage_from_api
-from ..long_lived import is_long_lived_account, format_expiry_dday
 from ..codex_provider import (
     is_codex_available, load_codex_index, get_current_codex_account_id,
     get_codex_token_status, switch_codex_account,
     CODEX_ACCOUNTS_DIR, read_codex_auth, get_codex_auth_info, fetch_codex_usage,
 )
-
-
-def build_shell_export_lines(token_type, access_token):
-    """switch 결과로 emit할 shell line 생성
-
-    - long-lived + token 있음: export CLAUDE_CODE_OAUTH_TOKEN='...'
-    - 그 외 (oauth/None): unset CLAUDE_CODE_OAUTH_TOKEN
-    """
-    if token_type == "long-lived" and access_token:
-        return f"export CLAUDE_CODE_OAUTH_TOKEN='{access_token}'"
-    return "unset CLAUDE_CODE_OAUTH_TOKEN"
 
 
 def _cleanup_old_backups(backup_dir, prefix, keep=5):
@@ -44,14 +32,8 @@ def _cleanup_old_backups(backup_dir, prefix, keep=5):
             pass
 
 
-def cmd_switch(account_id=None, shell_export=False):
-    """다른 계정으로 전환 (대화형 선택 지원)
-
-    Args:
-        account_id: 전환할 계정 ID. None이면 대화형 선택.
-        shell_export: True면 stdout 마지막에 eval 가능한 export/unset 라인 출력.
-                      function wrapper(.zshrc)에서 자동 eval 용도.
-    """
+def cmd_switch(account_id=None):
+    """다른 계정으로 전환 (대화형 선택 지원)"""
     index = load_index()
 
     if not index["accounts"]:
@@ -77,26 +59,11 @@ def cmd_switch(account_id=None, shell_export=False):
         # 전체 계정 사용량 가져오기 (list와 동일)
         usage_map = {}
         token_status_map = {}
-        expires_at_map = {}
 
         def _fetch_for_account(acc):
-            # Long-lived: API 호출 skip + 파일에서 expiresAt만 읽음
-            if is_long_lived_account(acc):
-                cred_filename = acc.get("credentialFile")
-                expires_ms = None
-                if cred_filename:
-                    cred_path = ACCOUNTS_DIR / cred_filename
-                    if cred_path.exists():
-                        try:
-                            cred = json.loads(cred_path.read_text())
-                            expires_ms = cred.get("claudeAiOauth", {}).get("expiresAt")
-                        except Exception:
-                            pass
-                return (acc["id"], None, TokenStatus.NO_TOKEN, expires_ms)
-
             if _is_current(acc):
                 usage, ts = _fetch_usage_from_api(include_token_status=True)
-                return (acc["id"], usage, ts, None)
+                return (acc["id"], usage, ts)
             else:
                 cred_filename = acc.get("credentialFile")
                 if cred_filename:
@@ -108,20 +75,19 @@ def cmd_switch(account_id=None, shell_export=False):
                                 credential, include_token_status=True,
                                 credential_file=credential_path
                             )
-                            return (acc["id"], usage, ts, None)
+                            return (acc["id"], usage, ts)
                         except Exception:
                             pass
-                return (acc["id"], None, TokenStatus.NO_TOKEN, None)
+                return (acc["id"], None, TokenStatus.NO_TOKEN)
 
         # 계정별 사용량 병렬 조회 (각 계정은 서로 다른 토큰 사용 → rate limit 독립)
         max_workers = min(len(index["accounts"]), 8)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             for result in executor.map(_fetch_for_account, index["accounts"]):
                 try:
-                    acc_id, usage, ts, expires_ms = result
+                    acc_id, usage, ts = result
                     usage_map[acc_id] = usage
                     token_status_map[acc_id] = ts
-                    expires_at_map[acc_id] = expires_ms
                 except Exception:
                     pass
 
@@ -151,21 +117,8 @@ def cmd_switch(account_id=None, shell_export=False):
 
             acc_org_name = acc.get("organizationName", "")
             org_badge = f" {c(Colors.MAGENTA, f'@{acc_org_name}')}" if _is_real_org(acc_org_name) else ""
-            type_indicator = f" {c(Colors.CYAN, '[CI]')}" if is_long_lived_account(acc) else ""
-            print(f"  [{i}] {marker} {acc['name']}{org_badge} {plan_badge}{type_indicator}")
+            print(f"  [{i}] {marker} {acc['name']}{org_badge} {plan_badge}")
             print(f"      {c(Colors.DIM, acc['email'])}")
-
-            # Long-lived: usage 대신 D-day 만 표시
-            if is_long_lived_account(acc):
-                expires_ms = expires_at_map.get(acc["id"])
-                if expires_ms:
-                    label, severity = format_expiry_dday(expires_ms)
-                    color = {"normal": Colors.DIM, "warn": Colors.YELLOW,
-                             "danger": Colors.RED, "expired": Colors.RED}.get(severity, Colors.DIM)
-                    print(f"      {c(Colors.DIM, '만료')} {c(color, label)}")
-                else:
-                    print(f"      {c(Colors.DIM, '(만료 시간 없음)')}")
-                continue
 
             # 사용량 표시 (전체 계정)
             real_usage = usage_map.get(acc["id"])
@@ -357,20 +310,6 @@ def cmd_switch(account_id=None, shell_export=False):
     current = get_current_account()
     if is_same_account(account, current):
         print(f"이미 해당 계정으로 로그인되어 있습니다: {account['name']}")
-        # shell-export 모드: 같은 계정이라도 env 동기화를 위해 라인 출력
-        # (새 shell 세션에서 첫 활성화 시 환경변수가 따라오게 함)
-        if shell_export:
-            token_type = account.get("tokenType", "oauth")
-            access_token = None
-            if token_type == "long-lived":
-                cred_file = account.get("credentialFile")
-                if cred_file:
-                    try:
-                        cred = json.loads((ACCOUNTS_DIR / cred_file).read_text())
-                        access_token = cred.get("claudeAiOauth", {}).get("accessToken")
-                    except Exception:
-                        pass
-            print(build_shell_export_lines(token_type, access_token))
         return True
 
     # Backup current state
@@ -419,17 +358,7 @@ def cmd_switch(account_id=None, shell_export=False):
 
     if credential_file:
         credential_path = ACCOUNTS_DIR / credential_file
-        if credential_path.exists() and is_long_lived_account(account):
-            # long-lived: refresh 안 함 (refresh token 없음). 파일 그대로 사용.
-            try:
-                new_credential = json.loads(credential_path.read_text())
-                token_status = "fresh"
-            except (json.JSONDecodeError, IOError):
-                new_credential = None
-                token_status = "no_credential"
-            if new_credential and set_keychain_credential(new_credential):
-                credential_switched = True
-        elif credential_path.exists():
+        if credential_path.exists():
             new_credential, error = _safe_refresh_credential(credential_path, account['id'], skip_fresh_check=True)
             if new_credential is not None and not error:
                 token_status = "refreshed"
@@ -516,36 +445,8 @@ def cmd_switch(account_id=None, shell_export=False):
         print(f"  OAuth: {c(Colors.YELLOW, '토큰 없음 (재로그인 필요)')}")
         print(f"  {c(Colors.DIM, '→ /login 후 /account:add 로 credential을 저장하세요')}")
 
-    # Long-lived 토큰 만료 D-day 표시
-    if is_long_lived_account(account) and credential_file:
-        expires_ms = None
-        try:
-            credential = json.loads((ACCOUNTS_DIR / credential_file).read_text())
-            expires_ms = credential.get("claudeAiOauth", {}).get("expiresAt")
-        except Exception:
-            pass
-        if expires_ms:
-            label, severity = format_expiry_dday(expires_ms)
-            color = {"danger": Colors.RED, "warn": Colors.YELLOW,
-                     "expired": Colors.RED}.get(severity, Colors.DIM)
-            print(f"  Type: {c(Colors.CYAN, 'Long-lived')} (만료: {c(color, label)})")
-
     print()
     print(c(Colors.YELLOW, "  Claude Code를 재시작해야 변경사항이 적용됩니다."))
     print(c(Colors.DIM, "  터미널에서 'exit' 후 다시 'claude' 실행"))
     print()
-
-    # --shell-export: eval 가능한 env line을 마지막에 출력
-    # function wrapper(.zshrc)가 stdout을 파싱하여 export/unset line만 eval.
-    if shell_export:
-        token_type = account.get("tokenType", "oauth")
-        access_token = None
-        if token_type == "long-lived" and credential_file:
-            try:
-                credential = json.loads((ACCOUNTS_DIR / credential_file).read_text())
-                access_token = credential.get("claudeAiOauth", {}).get("accessToken")
-            except Exception:
-                pass
-        print(build_shell_export_lines(token_type, access_token))
-
     return True

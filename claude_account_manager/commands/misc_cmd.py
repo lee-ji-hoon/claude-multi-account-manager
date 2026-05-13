@@ -1,16 +1,14 @@
 """
-Miscellaneous commands: rename, set_plan, current, help, setup_hook, update, version, warn_expiring_long_lived
+Miscellaneous commands: rename, set_plan, current, help, setup_hook, update, version
 """
 import json
 import shutil
-import sys
 from pathlib import Path
 
-from ..config import __version__, PACKAGE_NAME, ACCOUNTS_DIR
+from ..config import __version__, PACKAGE_NAME
 from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
 from ..version import check_for_updates
-from ..long_lived import is_long_lived_account, format_expiry_dday
 
 
 def cmd_current():
@@ -231,29 +229,3 @@ def cmd_help():
     /account rename joel 조엘
     /account set-plan joel Pro
 """)
-
-
-def cmd_warn_expiring_long_lived(days=7):
-    """long-lived 계정 중 만료 임박(D-days 이내) 항목을 stderr로 경고
-
-    SessionStart hook에서 호출. 정상 long-lived 계정은 출력 없이 종료.
-    """
-    index = load_index()
-    for acc in index["accounts"]:
-        if not is_long_lived_account(acc):
-            continue
-        cred_file = acc.get("credentialFile")
-        if not cred_file:
-            continue
-        cred_path = ACCOUNTS_DIR / cred_file
-        if not cred_path.exists():
-            continue
-        try:
-            cred = json.loads(cred_path.read_text())
-        except (json.JSONDecodeError, IOError):
-            continue
-        expires_ms = cred.get("claudeAiOauth", {}).get("expiresAt")
-        label, severity = format_expiry_dday(expires_ms)
-        if severity in ("danger", "expired"):
-            print(f"[warning] long-lived 토큰 '{acc['name']}' {label}. "
-                  f"갱신: claude setup-token → /account:add", file=sys.stderr)

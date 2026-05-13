@@ -23,4 +23,3 @@ python3 "${CLAUDE_PLUGIN_ROOT}/account_manager.py" list
 - Current session / weekly usage progress bar
 - Time remaining until reset
 - Time remaining until token expiration
-- Long-lived tokens are shown with a `[CI]` badge and `D-day` expiry; usage API is skipped for them (inference-only scope, no `/api/oauth/usage` access)

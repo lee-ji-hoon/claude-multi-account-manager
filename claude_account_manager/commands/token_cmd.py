@@ -13,7 +13,6 @@ from ..keychain import get_keychain_credential
 from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon, is_token_expired, is_token_fresh, is_credential_valid, classify_refresh_error, RefreshError
 from ..api import _fetch_usage_from_api
 from ..account import detect_plan_from_credential, is_same_account
-from ..long_lived import is_long_lived_account, format_expiry_dday
 from ..logger import log, log_token_info
 
 
@@ -148,40 +147,6 @@ def cmd_check():
     print(f"  계정: {current_email}")
     print()
 
-    # 활성 계정이 long-lived면 API 호출 없이 expiresAt만 검사
-    index = load_index()
-    active_id = index.get("activeAccountId")
-    active_account = next((a for a in index["accounts"] if a["id"] == active_id), None)
-
-    if active_account and is_long_lived_account(active_account):
-        cred_file = active_account.get("credentialFile")
-        if not cred_file:
-            print(c(Colors.RED, "  credential 파일이 없습니다"))
-            print(c(Colors.DIM, "  " + "─" * 50))
-            print()
-            return
-        cred_path = ACCOUNTS_DIR / cred_file
-        try:
-            credential = json.loads(cred_path.read_text())
-        except (json.JSONDecodeError, IOError) as e:
-            print(c(Colors.RED, f"  credential 파싱 실패: {e}"))
-            print(c(Colors.DIM, "  " + "─" * 50))
-            print()
-            return
-        expires_ms = credential.get("claudeAiOauth", {}).get("expiresAt")
-        label, severity = format_expiry_dday(expires_ms)
-        color = {"normal": Colors.GREEN, "warn": Colors.YELLOW,
-                 "danger": Colors.RED, "expired": Colors.RED}.get(severity, Colors.DIM)
-        print(f"  Type: {c(Colors.CYAN, 'Long-lived')}")
-        print(f"  만료까지: {c(color, label)}")
-        if severity == "expired":
-            print()
-            print(c(Colors.RED, "  토큰이 만료되었습니다."))
-            print(c(Colors.YELLOW, "  재발급: claude setup-token → /account:add"))
-        print(c(Colors.DIM, "  " + "─" * 50))
-        print()
-        return
-
     # 현재 토큰 상태 확인
     token_status, message = check_token_status()
 
@@ -305,11 +270,6 @@ def cmd_refresh_all():
     error_count = 0
 
     for acc in index["accounts"]:
-        # Long-lived 계정은 refresh 안 함 (refresh token 없음)
-        if is_long_lived_account(acc):
-            log("INFO", f"[{acc['id']}] long-lived 계정 → refresh 스킵")
-            continue
-
         credential_file = acc.get("credentialFile")
         if not credential_file:
             continue
@@ -475,10 +435,6 @@ def cmd_refresh_expiring(hours=1):
                 break
 
     for acc in index["accounts"]:
-        # Long-lived 계정은 refresh 안 함
-        if is_long_lived_account(acc):
-            continue
-
         # 현재 계정은 스킵 (이미 활성 상태)
         if current and is_same_account(acc, current):
             continue
