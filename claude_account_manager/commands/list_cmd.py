@@ -12,6 +12,7 @@ from ..keychain import get_keychain_credential
 from ..token import TokenStatus
 from ..api import _fetch_usage_from_api
 from ..account import estimate_plan, is_same_account, _is_real_org
+from ..long_lived import is_long_lived_account, format_expiry_dday
 
 
 def _get_token_expires_at(credential):
@@ -48,6 +49,20 @@ def cmd_list():
         # 병렬로 모든 계정의 사용량 가져오기
         def fetch_account_usage(acc):
             """계정별 사용량 및 토큰 상태 가져오기 (401 시 자동 갱신 포함)"""
+            # Long-lived 계정은 API 호출 없이 expiresAt만 파일에서 읽음
+            if is_long_lived_account(acc):
+                cred_filename = acc.get("credentialFile")
+                expires_at = None
+                if cred_filename:
+                    credential_path = ACCOUNTS_DIR / cred_filename
+                    if credential_path.exists():
+                        try:
+                            credential = json.loads(credential_path.read_text())
+                            expires_at = _get_token_expires_at(credential)
+                        except Exception:
+                            pass
+                return (acc["id"], None, TokenStatus.NO_TOKEN, expires_at)
+
             is_current = _is_current(acc)
             if is_current:
                 # 현재 계정: Keychain 사용, credential_file=None
@@ -142,17 +157,30 @@ def cmd_list():
             }
             plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
 
-            # 출력: [번호] ● name (org) [Plan] - 상태
+            # 출력: [번호] ● name (org) [Plan] [CI?] - 상태
             status_text = f" - {status}" if status else ""
             acc_org_name = acc.get("organizationName", "")
             org_badge = f" {c(Colors.MAGENTA, f'@{acc_org_name}')}" if _is_real_org(acc_org_name) else ""
-            print(f"  [{i}] {marker} {acc['name']}{org_badge} {plan_badge}{status_text}")
+            type_indicator = f" {c(Colors.CYAN, '[CI]')}" if is_long_lived_account(acc) else ""
+            print(f"  [{i}] {marker} {acc['name']}{org_badge} {plan_badge}{type_indicator}{status_text}")
             print(f"      {c(Colors.DIM, acc['email'])}")
 
             # 사용량 표시 (미리 가져온 데이터 사용)
             real_usage = usage_map.get(acc["id"])
             token_status = token_status_map.get(acc["id"], TokenStatus.NO_TOKEN)
             expires_at = expires_at_map.get(acc["id"])
+
+            # Long-lived 계정: usage 대신 D-day 만 표시
+            if is_long_lived_account(acc):
+                if expires_at:
+                    expires_ms = int(expires_at.timestamp() * 1000)
+                    label, severity = format_expiry_dday(expires_ms)
+                    color = {"normal": Colors.DIM, "warn": Colors.YELLOW,
+                             "danger": Colors.RED, "expired": Colors.RED}.get(severity, Colors.DIM)
+                    print(f"      {c(Colors.DIM, '만료')} {c(color, label)}")
+                else:
+                    print(f"      {c(Colors.DIM, '(만료 시간 없음)')}")
+                continue
 
             # 토큰 상태에 따른 경고 표시
             if token_status == TokenStatus.EXPIRED:
