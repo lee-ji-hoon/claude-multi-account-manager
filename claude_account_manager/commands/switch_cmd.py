@@ -15,6 +15,18 @@ from .token_cmd import _safe_refresh_credential
 from ..logger import log
 from ..account import estimate_plan, is_same_account, _is_real_org
 from ..api import _fetch_usage_from_api
+from ..long_lived import is_long_lived_account, format_expiry_dday
+
+
+def build_shell_export_lines(token_type, access_token):
+    """switch 결과로 emit할 shell line 생성
+
+    - long-lived + token 있음: export CLAUDE_CODE_OAUTH_TOKEN='...'
+    - 그 외 (oauth/None): unset CLAUDE_CODE_OAUTH_TOKEN
+    """
+    if token_type == "long-lived" and access_token:
+        return f"export CLAUDE_CODE_OAUTH_TOKEN='{access_token}'"
+    return "unset CLAUDE_CODE_OAUTH_TOKEN"
 
 
 def _cleanup_old_backups(backup_dir, prefix, keep=5):
@@ -27,8 +39,14 @@ def _cleanup_old_backups(backup_dir, prefix, keep=5):
             pass
 
 
-def cmd_switch(account_id=None):
-    """다른 계정으로 전환 (대화형 선택 지원)"""
+def cmd_switch(account_id=None, shell_export=False):
+    """다른 계정으로 전환 (대화형 선택 지원)
+
+    Args:
+        account_id: 전환할 계정 ID. None이면 대화형 선택.
+        shell_export: True면 stdout 마지막에 eval 가능한 export/unset 라인 출력.
+                      function wrapper(.zshrc)에서 자동 eval 용도.
+    """
     index = load_index()
 
     if not index["accounts"]:
@@ -256,7 +274,17 @@ def cmd_switch(account_id=None):
 
     if credential_file:
         credential_path = ACCOUNTS_DIR / credential_file
-        if credential_path.exists():
+        if credential_path.exists() and is_long_lived_account(account):
+            # long-lived: refresh 안 함 (refresh token 없음). 파일 그대로 사용.
+            try:
+                new_credential = json.loads(credential_path.read_text())
+                token_status = "fresh"
+            except (json.JSONDecodeError, IOError):
+                new_credential = None
+                token_status = "no_credential"
+            if new_credential and set_keychain_credential(new_credential):
+                credential_switched = True
+        elif credential_path.exists():
             new_credential, error = _safe_refresh_credential(credential_path, account['id'], skip_fresh_check=True)
             if new_credential is not None and not error:
                 token_status = "refreshed"
@@ -343,8 +371,36 @@ def cmd_switch(account_id=None):
         print(f"  OAuth: {c(Colors.YELLOW, '토큰 없음 (재로그인 필요)')}")
         print(f"  {c(Colors.DIM, '→ /login 후 /account:add 로 credential을 저장하세요')}")
 
+    # Long-lived 토큰 만료 D-day 표시
+    if is_long_lived_account(account) and credential_file:
+        expires_ms = None
+        try:
+            credential = json.loads((ACCOUNTS_DIR / credential_file).read_text())
+            expires_ms = credential.get("claudeAiOauth", {}).get("expiresAt")
+        except Exception:
+            pass
+        if expires_ms:
+            label, severity = format_expiry_dday(expires_ms)
+            color = {"danger": Colors.RED, "warn": Colors.YELLOW,
+                     "expired": Colors.RED}.get(severity, Colors.DIM)
+            print(f"  Type: {c(Colors.CYAN, 'Long-lived')} (만료: {c(color, label)})")
+
     print()
     print(c(Colors.YELLOW, "  Claude Code를 재시작해야 변경사항이 적용됩니다."))
     print(c(Colors.DIM, "  터미널에서 'exit' 후 다시 'claude' 실행"))
     print()
+
+    # --shell-export: eval 가능한 env line을 마지막에 출력
+    # function wrapper(.zshrc)가 stdout을 파싱하여 export/unset line만 eval.
+    if shell_export:
+        token_type = account.get("tokenType", "oauth")
+        access_token = None
+        if token_type == "long-lived" and credential_file:
+            try:
+                credential = json.loads((ACCOUNTS_DIR / credential_file).read_text())
+                access_token = credential.get("claudeAiOauth", {}).get("accessToken")
+            except Exception:
+                pass
+        print(build_shell_export_lines(token_type, access_token))
+
     return True

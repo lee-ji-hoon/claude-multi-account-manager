@@ -46,8 +46,16 @@ def main():
         extra = args[1:] if len(args) > 1 else None
         cmd_launch(extra)
     elif args[0] == "switch":
-        account_id = args[1] if len(args) > 1 else None
-        cmd_switch(account_id)
+        rest = args[1:]
+        shell_export = False
+        positional = []
+        for arg in rest:
+            if arg == "--shell-export":
+                shell_export = True
+            else:
+                positional.append(arg)
+        account_id = positional[0] if positional else None
+        cmd_switch(account_id, shell_export=shell_export)
     elif args[0] in ("remove", "rm", "delete"):
         account_id = args[1] if len(args) > 1 else None
         cmd_remove(account_id)
