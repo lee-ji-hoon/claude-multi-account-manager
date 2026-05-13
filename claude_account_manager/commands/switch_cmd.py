@@ -72,11 +72,26 @@ def cmd_switch(account_id=None, shell_export=False):
         # 전체 계정 사용량 가져오기 (list와 동일)
         usage_map = {}
         token_status_map = {}
+        expires_at_map = {}
 
         def _fetch_for_account(acc):
+            # Long-lived: API 호출 skip + 파일에서 expiresAt만 읽음
+            if is_long_lived_account(acc):
+                cred_filename = acc.get("credentialFile")
+                expires_ms = None
+                if cred_filename:
+                    cred_path = ACCOUNTS_DIR / cred_filename
+                    if cred_path.exists():
+                        try:
+                            cred = json.loads(cred_path.read_text())
+                            expires_ms = cred.get("claudeAiOauth", {}).get("expiresAt")
+                        except Exception:
+                            pass
+                return (acc["id"], None, TokenStatus.NO_TOKEN, expires_ms)
+
             if _is_current(acc):
                 usage, ts = _fetch_usage_from_api(include_token_status=True)
-                return (acc["id"], usage, ts)
+                return (acc["id"], usage, ts, None)
             else:
                 cred_filename = acc.get("credentialFile")
                 if cred_filename:
@@ -88,19 +103,20 @@ def cmd_switch(account_id=None, shell_export=False):
                                 credential, include_token_status=True,
                                 credential_file=credential_path
                             )
-                            return (acc["id"], usage, ts)
+                            return (acc["id"], usage, ts, None)
                         except Exception:
                             pass
-                return (acc["id"], None, TokenStatus.NO_TOKEN)
+                return (acc["id"], None, TokenStatus.NO_TOKEN, None)
 
         # 계정별 사용량 병렬 조회 (각 계정은 서로 다른 토큰 사용 → rate limit 독립)
         max_workers = min(len(index["accounts"]), 8)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             for result in executor.map(_fetch_for_account, index["accounts"]):
                 try:
-                    acc_id, usage, ts = result
+                    acc_id, usage, ts, expires_ms = result
                     usage_map[acc_id] = usage
                     token_status_map[acc_id] = ts
+                    expires_at_map[acc_id] = expires_ms
                 except Exception:
                     pass
 
@@ -130,8 +146,21 @@ def cmd_switch(account_id=None, shell_export=False):
 
             acc_org_name = acc.get("organizationName", "")
             org_badge = f" {c(Colors.MAGENTA, f'@{acc_org_name}')}" if _is_real_org(acc_org_name) else ""
-            print(f"  [{i}] {marker} {acc['name']}{org_badge} {plan_badge}")
+            type_indicator = f" {c(Colors.CYAN, '[CI]')}" if is_long_lived_account(acc) else ""
+            print(f"  [{i}] {marker} {acc['name']}{org_badge} {plan_badge}{type_indicator}")
             print(f"      {c(Colors.DIM, acc['email'])}")
+
+            # Long-lived: usage 대신 D-day 만 표시
+            if is_long_lived_account(acc):
+                expires_ms = expires_at_map.get(acc["id"])
+                if expires_ms:
+                    label, severity = format_expiry_dday(expires_ms)
+                    color = {"normal": Colors.DIM, "warn": Colors.YELLOW,
+                             "danger": Colors.RED, "expired": Colors.RED}.get(severity, Colors.DIM)
+                    print(f"      {c(Colors.DIM, '만료')} {c(color, label)}")
+                else:
+                    print(f"      {c(Colors.DIM, '(만료 시간 없음)')}")
+                continue
 
             # 사용량 표시 (전체 계정)
             real_usage = usage_map.get(acc["id"])
