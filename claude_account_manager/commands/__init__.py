@@ -15,6 +15,7 @@ from .push_cmd import cmd_push
 from .pull_cmd import cmd_pull
 from .launch_cmd import cmd_launch
 from .logs_cmd import cmd_logs
+from .export_token_cmd import cmd_export_token
 
 
 def main():
@@ -84,6 +85,9 @@ def main():
         cmd_logs(subcommand)
     elif args[0] == "check":
         cmd_check()
+    elif args[0] == "export-token":
+        account_id = args[1] if len(args) > 1 else None
+        cmd_export_token(account_id)
     elif args[0] == "update":
         cmd_update()
     elif args[0] == "current":
@@ -118,4 +122,5 @@ __all__ = [
     "cmd_update",
     "cmd_version",
     "cmd_help",
+    "cmd_export_token",
 ]
