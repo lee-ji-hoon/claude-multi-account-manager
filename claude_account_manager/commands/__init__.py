@@ -8,7 +8,7 @@ from .add_cmd import cmd_add, cmd_auto_add
 from .switch_cmd import cmd_switch
 from .remove_cmd import cmd_remove
 from .token_cmd import cmd_check, cmd_refresh_all, cmd_refresh_expiring
-from .misc_cmd import cmd_current, cmd_rename, cmd_set_plan, cmd_setup_hook, cmd_update, cmd_version, cmd_help
+from .misc_cmd import cmd_current, cmd_rename, cmd_set_plan, cmd_setup_hook, cmd_update, cmd_version, cmd_help, cmd_warn_expiring_long_lived
 from .import_cmd import cmd_import
 from .export_cmd import cmd_export_for_import
 from .push_cmd import cmd_push
@@ -85,6 +85,9 @@ def main():
         count = cmd_refresh_expiring(hours)
         if count > 0:
             print(f"만료 임박 토큰 갱신: {count}개")
+        sys.exit(0)
+    elif args[0] == "warn-expiring-long-lived":
+        cmd_warn_expiring_long_lived()
         sys.exit(0)
     elif args[0] == "setup-hook":
         cmd_setup_hook()

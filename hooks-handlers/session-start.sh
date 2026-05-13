@@ -7,6 +7,7 @@ SCRIPT_DIR="$(dirname "$(dirname "$0")")"
 LOG_DIR="$HOME/.claude/accounts/logs"
 mkdir -p "$LOG_DIR"
 python3 "$SCRIPT_DIR/account_manager.py" auto-add 2>>"$LOG_DIR/token-refresh.log"
+python3 "$SCRIPT_DIR/account_manager.py" warn-expiring-long-lived 2>>"$LOG_DIR/token-refresh.log" || true
 
 # 터미널 alias 자동 설정 (마커 기반 블록 관리, version-agnostic)
 SHELL_RC=""
