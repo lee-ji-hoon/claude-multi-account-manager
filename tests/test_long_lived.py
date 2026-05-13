@@ -1,6 +1,11 @@
 import time
 import unittest
+from datetime import datetime, timedelta
 from claude_account_manager.long_lived import (
+    EXPIRY_DANGER_DAYS,
+    EXPIRY_WARN_DAYS,
+    format_expiry_dday,
+    is_long_lived_account,
     plan_to_subscription_type,
     validate_token_format,
     wrap_long_lived_token,
@@ -79,6 +84,57 @@ class TestWrapLongLivedToken(unittest.TestCase):
     def test_pro_plan_subscription_type(self):
         wrapped = wrap_long_lived_token("sk-ant-oat01-x", "Pro")
         self.assertEqual(wrapped["claudeAiOauth"]["subscriptionType"], "pro")
+
+
+class TestIsLongLivedAccount(unittest.TestCase):
+    def test_oauth_default_when_missing(self):
+        self.assertFalse(is_long_lived_account({"id": "x"}))
+
+    def test_explicit_oauth(self):
+        self.assertFalse(is_long_lived_account({"tokenType": "oauth"}))
+
+    def test_long_lived(self):
+        self.assertTrue(is_long_lived_account({"tokenType": "long-lived"}))
+
+    def test_none_returns_false(self):
+        self.assertFalse(is_long_lived_account(None))
+
+
+class TestFormatExpiryDday(unittest.TestCase):
+    def _expires_in(self, days):
+        return int((datetime.now() + timedelta(days=days)).timestamp() * 1000)
+
+    def test_normal(self):
+        label, severity = format_expiry_dday(self._expires_in(200))
+        self.assertTrue(label.startswith("D-"))
+        self.assertEqual(severity, "normal")
+
+    def test_warn_at_30(self):
+        label, severity = format_expiry_dday(self._expires_in(25))
+        self.assertEqual(severity, "warn")
+
+    def test_danger_at_7(self):
+        label, severity = format_expiry_dday(self._expires_in(3))
+        self.assertEqual(severity, "danger")
+
+    def test_expired(self):
+        label, severity = format_expiry_dday(self._expires_in(-1))
+        self.assertEqual(label, "만료됨")
+        self.assertEqual(severity, "expired")
+
+    def test_today_is_danger(self):
+        # 12시간 후 만료 = D-0 (timedelta.days floors to 0)
+        expires_ms = int((datetime.now() + timedelta(hours=12)).timestamp() * 1000)
+        label, severity = format_expiry_dday(expires_ms)
+        self.assertEqual(severity, "danger")
+
+    def test_severity_thresholds_constants(self):
+        self.assertEqual(EXPIRY_WARN_DAYS, 30)
+        self.assertEqual(EXPIRY_DANGER_DAYS, 7)
+
+    def test_none_returns_question(self):
+        label, severity = format_expiry_dday(None)
+        self.assertEqual(label, "?")
 
 
 if __name__ == "__main__":

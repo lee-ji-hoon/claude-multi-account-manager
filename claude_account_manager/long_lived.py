@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 
 
 LONG_LIVED_VALIDITY_DAYS = 365
+EXPIRY_WARN_DAYS = 30
+EXPIRY_DANGER_DAYS = 7
 
 
 def validate_token_format(token):
@@ -56,3 +58,37 @@ def wrap_long_lived_token(token, plan, validity_days=LONG_LIVED_VALIDITY_DAYS):
             "rateLimitTier": rate_tier,
         }
     }
+
+
+def is_long_lived_account(account_entry):
+    """account index entry가 long-lived 계정인지 판정
+
+    tokenType 필드가 없으면 oauth (backward compat).
+    """
+    if not account_entry:
+        return False
+    return account_entry.get("tokenType", "oauth") == "long-lived"
+
+
+def format_expiry_dday(expires_at_ms):
+    """만료까지 D-day와 severity 레벨 반환
+
+    Returns:
+        tuple[str, str]: (라벨, severity)
+        severity: "normal" | "warn" | "danger" | "expired"
+    """
+    if not expires_at_ms:
+        return ("?", "normal")
+    expires = datetime.fromtimestamp(expires_at_ms / 1000)
+    delta = expires - datetime.now()
+    days = delta.days
+    if delta.total_seconds() < 0 and days < 0:
+        return ("만료됨", "expired")
+    label = f"D-{days}"
+    if days <= EXPIRY_DANGER_DAYS:
+        severity = "danger"
+    elif days <= EXPIRY_WARN_DAYS:
+        severity = "warn"
+    else:
+        severity = "normal"
+    return (label, severity)
