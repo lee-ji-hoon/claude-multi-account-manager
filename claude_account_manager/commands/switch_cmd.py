@@ -255,6 +255,20 @@ def cmd_switch(account_id=None, shell_export=False):
     current = get_current_account()
     if is_same_account(account, current):
         print(f"이미 해당 계정으로 로그인되어 있습니다: {account['name']}")
+        # shell-export 모드: 같은 계정이라도 env 동기화를 위해 라인 출력
+        # (새 shell 세션에서 첫 활성화 시 환경변수가 따라오게 함)
+        if shell_export:
+            token_type = account.get("tokenType", "oauth")
+            access_token = None
+            if token_type == "long-lived":
+                cred_file = account.get("credentialFile")
+                if cred_file:
+                    try:
+                        cred = json.loads((ACCOUNTS_DIR / cred_file).read_text())
+                        access_token = cred.get("claudeAiOauth", {}).get("accessToken")
+                    except Exception:
+                        pass
+            print(build_shell_export_lines(token_type, access_token))
         return True
 
     # Backup current state
