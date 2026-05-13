@@ -130,8 +130,20 @@ def cmd_list():
                 marker = " "
                 status = ""
 
-            # Plan 정보 가져오기
-            if "plan" in acc:
+            # Plan 정보 가져오기 — API planName 우선 (stale 방지)
+            real_usage = usage_map.get(acc["id"])
+            api_plan = real_usage.get("planName") if real_usage else None
+            if api_plan:
+                plan = api_plan
+                # 저장된 플랜과 다르면 index 자동 업데이트
+                if acc.get("plan") != api_plan:
+                    acc["plan"] = api_plan
+                    try:
+                        from ..storage import save_index
+                        save_index(index)
+                    except Exception:
+                        pass
+            elif "plan" in acc:
                 plan = acc["plan"]
             elif is_current:
                 plan = current_plan
@@ -166,7 +178,6 @@ def cmd_list():
             print(f"      {c(Colors.DIM, acc['email'])}")
 
             # 사용량 표시 (미리 가져온 데이터 사용)
-            real_usage = usage_map.get(acc["id"])
             token_status = token_status_map.get(acc["id"], TokenStatus.NO_TOKEN)
             expires_at = expires_at_map.get(acc["id"])
 
@@ -249,6 +260,124 @@ def cmd_list():
                             expire_color = Colors.DIM
                             expire_str = f"{hours}h {minutes}m"
                         print(f"      {c(Colors.DIM, '토큰')} {c(expire_color, f'🔑 {expire_str} 후 만료')}")
+
+    # Codex 섹션
+    from ..codex_provider import (
+        is_codex_available, load_codex_index, get_current_codex_account_id,
+        get_codex_token_status, CODEX_ACCOUNTS_DIR, read_codex_auth, get_codex_auth_info,
+        fetch_codex_usage,
+    )
+
+    def _fmt_seconds(secs):
+        secs = int(secs)
+        if secs <= 0:
+            return "곧"
+        d = secs // 86400
+        h = (secs % 86400) // 3600
+        m = (secs % 3600) // 60
+        if d > 0:
+            return f"{d}d {h}h"
+        if h > 0:
+            return f"{h}h {m}m"
+        return f"{m}m"
+
+    def _disp_len(s):
+        import unicodedata
+        return sum(2 if unicodedata.east_asian_width(ch) in ('W', 'F') else 1 for ch in s)
+
+    def _pad_label(s, width):
+        return s + ' ' * max(0, width - _disp_len(s))
+
+    def _print_codex_usage_rows(rows):
+        """rows: list of (label, window_dict). 레이블 너비 자동 정렬."""
+        if not rows:
+            return
+        max_w = max(_disp_len(label) for label, _ in rows)
+        for label, window in rows:
+            pct = window.get("used_percent", 0)
+            reset = window.get("reset_after_seconds", 0)
+            bar = make_progress_bar(pct)
+            color = Colors.RED if pct >= 95 else Colors.YELLOW if pct >= 80 else Colors.GREEN
+            reset_str = _fmt_seconds(reset)
+            padded = _pad_label(label, max_w)
+            print(f"      {c(Colors.DIM, padded)} {bar} {c(color, f'{pct}%')} | ⏱ {reset_str}")
+
+    claude_count = len(index["accounts"])
+
+    if is_codex_available():
+        codex_index = load_codex_index()
+        codex_accounts = codex_index.get("accounts", [])
+        if codex_accounts:
+            current_codex_id = get_current_codex_account_id()
+            print()
+            print(f"  {c(Colors.DIM, 'Codex')}")
+            for j, acc in enumerate(codex_accounts, claude_count + 1):
+                is_current = acc.get("account_id") == current_codex_id
+                marker = c(Colors.GREEN, "●") if is_current else " "
+
+                # JWT에서 실시간 name/email/plan 추출 (저장된 값 fallback)
+                auth_file = CODEX_ACCOUNTS_DIR / f"auth_{acc['id']}.json"
+                auth_data = read_codex_auth(auth_file)
+                if auth_data:
+                    info = get_codex_auth_info(auth_data)
+                    display_name = info.get("name") or acc.get("name", acc["id"])
+                    display_email = info.get("email") or acc.get("email", "")
+                    plan = info.get("plan") or acc.get("plan", "?")
+                else:
+                    display_name = acc.get("name", acc["id"])
+                    display_email = acc.get("email", "")
+                    plan = acc.get("plan", "?")
+
+                plan_colors = {"Pro": Colors.CYAN, "Plus": Colors.CYAN, "Free": Colors.DIM}
+                plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
+                email_str = f" {c(Colors.DIM, f'({display_email})')}" if display_email else ""
+                status_str = c(Colors.GREEN, "활성") if is_current else ""
+                status_text = f" - {status_str}" if status_str else ""
+                print(f"  [{j}] {marker} {display_name}{email_str} {plan_badge}{status_text}")
+
+                # 사용량 조회 (auth_data 있는 경우) — 레이블 모아서 한번에 정렬 출력
+                usage_data = fetch_codex_usage(auth_data) if auth_data else None
+                if usage_data:
+                    rows = []
+                    rl = usage_data.get("rate_limit", {})
+                    pw = rl.get("primary_window")
+                    sw = rl.get("secondary_window")
+                    if pw:
+                        rows.append(("5h", pw))
+                    if sw:
+                        rows.append(("주간", sw))
+                    for extra in usage_data.get("additional_rate_limits", []):
+                        short_name = extra.get("limit_name", "")
+                        short_name = short_name.replace("GPT-5.3-Codex-", "").replace("GPT-5-Codex-", "")
+                        erl = extra.get("rate_limit", {})
+                        epw = erl.get("primary_window")
+                        esw = erl.get("secondary_window")
+                        if epw:
+                            rows.append((f"{short_name} 5h", epw))
+                        if esw:
+                            rows.append((f"{short_name} 주간", esw))
+                    _print_codex_usage_rows(rows)
+
+                ts = get_codex_token_status(acc)
+                if ts == "expired":
+                    print(f"      {c(Colors.RED, '⚠ 토큰 만료')} - {c(Colors.YELLOW, 'codex login 필요')}")
+                elif ts == "expiring":
+                    print(f"      {c(Colors.YELLOW, '⚠ 24시간 내 만료')}")
+                elif ts == "no_auth":
+                    print(f"      {c(Colors.DIM, '(인증 파일 없음)')}")
+                else:
+                    if auth_data and auth_data.get("last_refresh"):
+                        try:
+                            from datetime import timedelta as _td
+                            dt = datetime.strptime(auth_data["last_refresh"][:19], "%Y-%m-%dT%H:%M:%S")
+                            expiry = dt + _td(hours=240)
+                            remaining = expiry - datetime.utcnow()
+                            days = int(remaining.total_seconds() // 86400)
+                            hrs = int((remaining.total_seconds() % 86400) // 3600)
+                            expire_color = Colors.YELLOW if days < 1 else Colors.DIM
+                            print(f"      {c(Colors.DIM, '토큰')} {c(expire_color, f'🔑 {days}d {hrs}h 후 만료')}")
+                        except Exception:
+                            pass
 
     print(c(Colors.DIM, "  " + "─" * 55))
 

@@ -7,6 +7,9 @@ from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
 from ..account import is_same_account, _is_real_org
+from ..codex_provider import (
+    is_codex_available, load_codex_index, get_current_codex_account_id, remove_codex_account,
+)
 
 
 def cmd_remove(account_id=None):
@@ -36,6 +39,22 @@ def cmd_remove(account_id=None):
                 org_display = f" ({acc_org_name})"
             print(f"      {c(Colors.DIM, acc['email'] + org_display)}")
 
+        # Codex 섹션
+        claude_count = len(index["accounts"])
+        codex_accounts = []
+        if is_codex_available():
+            codex_index = load_codex_index()
+            codex_accounts = codex_index.get("accounts", [])
+            if codex_accounts:
+                current_codex_id = get_current_codex_account_id()
+                print()
+                print(f"  {c(Colors.DIM, 'Codex')}")
+                for j, acc in enumerate(codex_accounts, claude_count + 1):
+                    is_current_codex = acc.get("account_id") == current_codex_id
+                    marker = c(Colors.GREEN, "●") if is_current_codex else " "
+                    plan_badge = c(Colors.DIM, f"[{acc.get('plan', '?')}]")
+                    print(f"  [{j}] {marker} {acc['name']} {plan_badge}")
+
         print(c(Colors.DIM, "  " + "─" * 55))
         print(f"  {c(Colors.DIM, '번호를 입력하세요 (취소: q)')}: ", end="", flush=True)
 
@@ -52,8 +71,30 @@ def cmd_remove(account_id=None):
 
         try:
             idx = int(choice) - 1
-            if 0 <= idx < len(index["accounts"]):
+            total_count = claude_count + len(codex_accounts)
+            if 0 <= idx < claude_count:
                 account_id = index["accounts"][idx]["id"]
+            elif claude_count <= idx < total_count:
+                codex_acc = codex_accounts[idx - claude_count]
+                print()
+                print(c(Colors.YELLOW, "  정말 삭제하시겠습니까?"))
+                print(f"  계정: {codex_acc['name']} (Codex)")
+                print(c(Colors.DIM, "  " + "─" * 40))
+                print(f"  {c(Colors.DIM, 'y/n (기본: n)')}: ", end="", flush=True)
+                try:
+                    confirm = input().strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print("\n취소됨")
+                    return False
+                if confirm not in ('y', 'yes'):
+                    print("취소됨")
+                    return False
+                ok, result = remove_codex_account(codex_acc)
+                if ok:
+                    print(f"계정 삭제 완료: {codex_acc['name']} (Codex)")
+                else:
+                    print(c(Colors.RED, f"삭제 실패: {result}"))
+                return ok
             else:
                 print(f"잘못된 번호입니다: {choice}")
                 return False

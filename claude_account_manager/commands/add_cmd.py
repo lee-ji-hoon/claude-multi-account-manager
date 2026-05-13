@@ -25,22 +25,51 @@ from ..token import is_credential_valid
 
 
 def cmd_add(name=None):
-    """현재 계정을 프로필로 저장 (또는 long-lived 토큰 등록)"""
-    print()
-    print(c(Colors.BOLD, "  계정 등록 유형 선택"))
-    print(c(Colors.DIM, "  " + "─" * 40))
-    print(f"  [1] 현재 로그인된 OAuth 계정 저장 (기본)")
-    print(f"  [2] Long-lived 토큰 등록 (CI/스크립트용, 1년 유효)")
-    print(c(Colors.DIM, "  " + "─" * 40))
-    try:
-        type_choice = input(f"  {c(Colors.DIM, '번호 (기본: 1)')}: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        print("취소됨")
-        return False
+    """현재 계정을 프로필로 저장 (Claude OAuth / Long-lived / Codex 선택)"""
+    from ..codex_provider import is_codex_available, add_codex_account
 
-    if type_choice == "2":
-        return cmd_add_long_lived()
+    if is_codex_available():
+        print()
+        print(c(Colors.BOLD, "  어떤 계정을 추가할까요?"))
+        print(c(Colors.DIM, "  " + "─" * 40))
+        print("  [1] Claude OAuth (현재 Claude Code 로그인)")
+        print("  [2] Codex        (현재 ~/.codex/auth.json)")
+        print("  [3] Long-lived 토큰 (CI/스크립트용, 1년)")
+        print(c(Colors.DIM, "  " + "─" * 40))
+        print(f"  {c(Colors.DIM, '번호를 입력하세요 (기본: 1)')}: ", end="", flush=True)
+        try:
+            choice = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            print("취소됨")
+            return False
+        if choice == "2":
+            ok, msg = add_codex_account(name)
+            print()
+            if ok:
+                print(c(Colors.GREEN, f"  ✓ Codex 계정 저장됨: {msg}"))
+            else:
+                print(c(Colors.RED, f"  ✗ {msg}"))
+            print()
+            return ok
+        if choice == "3":
+            return cmd_add_long_lived()
+    else:
+        # Codex가 없는 환경 → Claude OAuth vs Long-lived 토큰 선택
+        print()
+        print(c(Colors.BOLD, "  계정 등록 유형 선택"))
+        print(c(Colors.DIM, "  " + "─" * 40))
+        print(f"  [1] 현재 로그인된 OAuth 계정 저장 (기본)")
+        print(f"  [2] Long-lived 토큰 등록 (CI/스크립트용, 1년 유효)")
+        print(c(Colors.DIM, "  " + "─" * 40))
+        try:
+            type_choice = input(f"  {c(Colors.DIM, '번호 (기본: 1)')}: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            print("취소됨")
+            return False
+        if type_choice == "2":
+            return cmd_add_long_lived()
 
     current = get_current_account()
     if not current:

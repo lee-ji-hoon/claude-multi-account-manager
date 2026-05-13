@@ -16,6 +16,11 @@ from ..logger import log
 from ..account import estimate_plan, is_same_account, _is_real_org
 from ..api import _fetch_usage_from_api
 from ..long_lived import is_long_lived_account, format_expiry_dday
+from ..codex_provider import (
+    is_codex_available, load_codex_index, get_current_codex_account_id,
+    get_codex_token_status, switch_codex_account,
+    CODEX_ACCOUNTS_DIR, read_codex_auth, get_codex_auth_info, fetch_codex_usage,
+)
 
 
 def build_shell_export_lines(token_type, access_token):
@@ -199,6 +204,87 @@ def cmd_switch(account_id=None, shell_export=False):
                             reset_str = f" | {c(Colors.CYAN, '⏱')} {hours}h {minutes}m"
                     print(f"      {c(Colors.DIM, '주간')} {bar} {percentage}%{reset_str}")
 
+        # Codex 섹션
+        import unicodedata as _ud
+
+        def _disp_len(s):
+            return sum(2 if _ud.east_asian_width(ch) in ('W', 'F') else 1 for ch in s)
+
+        def _pad_label(s, width):
+            return s + ' ' * max(0, width - _disp_len(s))
+
+        def _fmt_secs(secs):
+            secs = int(secs)
+            if secs <= 0:
+                return "곧"
+            d = secs // 86400
+            h = (secs % 86400) // 3600
+            m = (secs % 3600) // 60
+            return f"{d}d {h}h" if d > 0 else (f"{h}h {m}m" if h > 0 else f"{m}m")
+
+        def _print_codex_rows(rows):
+            if not rows:
+                return
+            max_w = max(_disp_len(lbl) for lbl, _ in rows)
+            for lbl, window in rows:
+                pct = window.get("used_percent", 0)
+                bar = make_progress_bar(pct, width=12)
+                color = Colors.RED if pct >= 95 else Colors.YELLOW if pct >= 80 else Colors.GREEN
+                reset_str = _fmt_secs(window.get("reset_after_seconds", 0))
+                print(f"      {c(Colors.DIM, _pad_label(lbl, max_w))} {bar} {c(color, f'{pct}%')} | ⏱ {reset_str}")
+
+        claude_count = len(index["accounts"])
+        codex_accounts = []
+        if is_codex_available():
+            codex_index = load_codex_index()
+            codex_accounts = codex_index.get("accounts", [])
+            if codex_accounts:
+                current_codex_id = get_current_codex_account_id()
+                print()
+                print(f"  {c(Colors.DIM, 'Codex')}")
+                for j, acc in enumerate(codex_accounts, claude_count + 1):
+                    is_current_codex = acc.get("account_id") == current_codex_id
+                    marker = c(Colors.GREEN, "●") if is_current_codex else " "
+
+                    auth_file = CODEX_ACCOUNTS_DIR / f"auth_{acc['id']}.json"
+                    auth_data = read_codex_auth(auth_file)
+                    if auth_data:
+                        info = get_codex_auth_info(auth_data)
+                        display_name = info.get("name") or acc.get("name", acc["id"])
+                        display_email = info.get("email") or acc.get("email", "")
+                        plan = info.get("plan") or acc.get("plan", "?")
+                    else:
+                        display_name = acc.get("name", acc["id"])
+                        display_email = acc.get("email", "")
+                        plan = acc.get("plan", "?")
+
+                    plan_colors = {"Pro": Colors.CYAN, "Plus": Colors.CYAN, "Free": Colors.DIM}
+                    plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
+                    email_str = f" {c(Colors.DIM, f'({display_email})')}" if display_email else ""
+                    ts = get_codex_token_status(acc)
+                    token_warn = (
+                        f" {c(Colors.RED, '⚠만료')}" if ts == "expired"
+                        else (f" {c(Colors.YELLOW, '⚠곧만료')}" if ts == "expiring" else "")
+                    )
+                    print(f"  [{j}] {marker} {display_name}{email_str} {plan_badge}{token_warn}")
+
+                    usage_data = fetch_codex_usage(auth_data) if auth_data else None
+                    if usage_data:
+                        rows = []
+                        rl = usage_data.get("rate_limit", {})
+                        if rl.get("primary_window"):
+                            rows.append(("5h", rl["primary_window"]))
+                        if rl.get("secondary_window"):
+                            rows.append(("주간", rl["secondary_window"]))
+                        for extra in usage_data.get("additional_rate_limits", []):
+                            sn = extra.get("limit_name", "").replace("GPT-5.3-Codex-", "").replace("GPT-5-Codex-", "")
+                            erl = extra.get("rate_limit", {})
+                            if erl.get("primary_window"):
+                                rows.append((f"{sn} 5h", erl["primary_window"]))
+                            if erl.get("secondary_window"):
+                                rows.append((f"{sn} 주간", erl["secondary_window"]))
+                        _print_codex_rows(rows)
+
         print(c(Colors.DIM, "  " + "─" * 55))
 
         print(f"  {c(Colors.DIM, '번호를 입력하세요 (취소: q)')}: ", end="", flush=True)
@@ -217,8 +303,24 @@ def cmd_switch(account_id=None, shell_export=False):
 
         try:
             idx = int(choice) - 1
-            if 0 <= idx < len(index["accounts"]):
+            total_count = claude_count + len(codex_accounts)
+            if 0 <= idx < claude_count:
                 account_id = index["accounts"][idx]["id"]
+            elif claude_count <= idx < total_count:
+                codex_acc = codex_accounts[idx - claude_count]
+                ok, result = switch_codex_account(codex_acc)
+                plan = codex_acc.get("plan", "?")
+                plan_colors = {"Pro": Colors.CYAN, "Plus": Colors.CYAN, "Free": Colors.DIM}
+                plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
+                print()
+                if ok:
+                    print(c(Colors.GREEN, f"  계정 전환 완료: {codex_acc['name']} {plan_badge}"))
+                    print(c(Colors.DIM, "  " + "─" * 40))
+                    print(c(Colors.YELLOW, "  Codex를 재시작해야 변경사항이 적용됩니다."))
+                else:
+                    print(c(Colors.RED, f"  전환 실패: {result}"))
+                print()
+                return ok
             else:
                 print(f"잘못된 번호입니다: {choice}")
                 return False

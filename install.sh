@@ -107,9 +107,10 @@ MARKER_END="# <<< account-manager <<<"
 ALIAS_ADDED=false
 if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
     # 기존 마커 블록 또는 레거시 블록 제거
-    if grep -q "$MARKER_BEGIN" "$SHELL_RC" 2>/dev/null; then
+    # NOTE: sed range는 첫 매칭 1쌍만 삭제하므로, 다중 블록 누적 시 while 루프로 모두 제거
+    while grep -q "$MARKER_BEGIN" "$SHELL_RC" 2>/dev/null; do
         sed -i '' "/$MARKER_BEGIN/,/$MARKER_END/d" "$SHELL_RC"
-    fi
+    done
     if grep -q "# Claude Account Manager" "$SHELL_RC" 2>/dev/null; then
         sed -i '' '/# Claude Account Manager.*터미널에서 계정 관리/d' "$SHELL_RC"
     fi

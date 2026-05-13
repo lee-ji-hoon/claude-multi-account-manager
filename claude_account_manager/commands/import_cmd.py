@@ -11,7 +11,6 @@ from pathlib import Path
 from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors
 from ..storage import load_index, save_index, load_claude_json
-from ..keychain import set_keychain_credential
 from ..account import detect_plan_from_credential, is_account_duplicate, generate_account_id, get_org_info, _is_real_org
 
 
@@ -278,16 +277,14 @@ def _register_account(profile, credential):
     profile_path.write_text(json.dumps(profile, indent=2, ensure_ascii=False))
     os.chmod(profile_path, 0o600)
 
-    # Credential을 Keychain에 저장
-    keychain_saved = set_keychain_credential(credential)
-
-    # Credential도 파일로 저장
+    # Credential은 파일로만 저장 (Keychain은 현재 로그인된 계정 보호를 위해 건드리지 않음)
+    # 사용자가 명시적으로 /account:switch 를 호출할 때 Keychain에 반영됨
     credential_file = f"credential_{account_id}.json"
     credential_path = ACCOUNTS_DIR / credential_file
     credential_path.write_text(json.dumps(credential, indent=2, ensure_ascii=False))
     os.chmod(credential_path, 0o600)
 
-    # Index 업데이트
+    # Index 업데이트 (activeAccountId는 변경하지 않음 - 현재 로그인 세션 보존)
     index = load_index()
     account_entry = {
         "id": account_id,
@@ -303,7 +300,6 @@ def _register_account(profile, credential):
     if org_uuid:
         account_entry["organizationUuid"] = org_uuid
     index["accounts"].append(account_entry)
-    index["activeAccountId"] = account_id
     save_index(index)
 
     # 성공 메시지
@@ -316,10 +312,9 @@ def _register_account(profile, credential):
     if _is_real_org(org_name):
         print(f"  조직: {org_name}")
     print(f"  Plan: {plan}")
-    if keychain_saved:
-        print(f"  Keychain: {c(Colors.GREEN, '저장됨')}")
-    else:
-        print(f"  Keychain: {c(Colors.YELLOW, '저장 실패 (파일만 저장됨)')}")
+    print()
+    print(c(Colors.DIM, "  현재 로그인 세션은 유지됩니다."))
+    print(c(Colors.CYAN, f"  → 이 계정으로 전환: /account:switch {account_id}"))
     print()
 
     return True
