@@ -41,6 +41,7 @@ After installation, your current account is automatically registered on session 
 | `/account:logs` | View token refresh logs |
 | `/account:repair` | Diagnose & fix installation issues |
 | `/account:report` | Auto-create GitHub Issue with diagnostics |
+| `/account:export-token [id]` | Print `export CLAUDE_CODE_OAUTH_TOKEN='...'` for CI/script use |
 
 ## Example
 
@@ -61,6 +62,32 @@ After installation, your current account is automatically registered on session 
       token 🔑 3h 42m remaining
   ───────────────────────────────────────────────────────
 ```
+
+## Long-lived OAuth Token (CI / Scripts)
+
+For CI pipelines or scripts where interactive browser login is unavailable, register a 1-year OAuth token issued by `claude setup-token`.
+
+### Issue + register
+
+```bash
+claude setup-token                # browser OAuth → token printed to stdout (copy it)
+/account:add                       # choose [2] Long-lived token → paste
+```
+
+### Activate
+
+```bash
+account-switch <id>                # zsh function wrapper auto-exports CLAUDE_CODE_OAUTH_TOKEN
+# or explicitly:
+account-export-token <id>          # same effect, current account only
+```
+
+### Caveats
+
+- Long-lived tokens have **no refresh token** — must be re-issued every year (D-7 warning on SessionStart).
+- Scoped to **inference only**: usage API (`/api/oauth/usage`) and profile endpoints return 403, so `list`/`switch` show `D-day` only (no progress bars).
+- `ANTHROPIC_API_KEY` env takes precedence over `CLAUDE_CODE_OAUTH_TOKEN` — unset it if you want the OAuth token to be used.
+- `--bare` mode does **not** read `CLAUDE_CODE_OAUTH_TOKEN`; use `ANTHROPIC_API_KEY` instead.
 
 ## How It Works
 
