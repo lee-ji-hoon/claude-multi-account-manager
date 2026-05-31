@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.2] - 2026-05-31
+
+### Fixed
+- **Codex 토큰 만료 오표시 수정** — `account switch` / `list` UI에서 정상 작동하는 Codex 계정이 `⚠만료`로 잘못 표시되던 문제. `get_codex_token_status`가 저장된 사본(`accounts/auth_{id}.json`)의 오래된 `last_refresh` + 240h 고정 윈도우를 기준으로 판정해, Codex CLI가 실제로는 토큰을 갱신했는데도 만료로 표시되던 괴리.
+  - 현재 활성 계정이면 `~/.codex/auth.json`(Codex CLI가 자동 갱신)을 기준으로 판정
+  - 임의의 240h 윈도우 대신 access_token JWT의 실제 `exp`를 사용 (exp 없으면 기존 `last_refresh + 240h`로 폴백)
+
 ## [2.5.1] - 2026-05-13
 
 ### Removed
