@@ -87,20 +87,40 @@ def get_current_codex_account_id() -> str | None:
 def get_codex_token_status(acc: dict) -> str:
     """
     계정의 토큰 상태 반환: 'ok' | 'expiring' | 'expired' | 'no_auth'
-    last_refresh 기준 (240시간 유효기간)
+
+    현재 활성 계정이면 ~/.codex/auth.json(Codex CLI가 자동 갱신)을 기준으로
+    판정해 실제 갱신 상태를 반영한다. 판정은 access_token JWT의 실제 exp를
+    쓰고, exp가 없으면 last_refresh + 240h로 폴백.
     """
     from datetime import datetime, timedelta
     auth_file = CODEX_ACCOUNTS_DIR / f"auth_{acc['id']}.json"
     auth = read_codex_auth(auth_file)
     if not auth:
         return "no_auth"
+    # 현재 활성 auth.json이 같은 계정이면 실제 갱신 상태를 반영
+    active = read_codex_auth()
+    if active and active.get("tokens", {}).get("account_id") == acc.get("account_id"):
+        auth = active
+    now = datetime.utcnow()
+    # access_token JWT의 exp 우선 (Codex CLI가 갱신한 실제 만료 시각)
+    exp = _decode_jwt_payload(auth.get("tokens", {}).get("access_token", "")).get("exp")
+    if exp:
+        try:
+            expiry = datetime.utcfromtimestamp(exp)
+            if now > expiry - timedelta(minutes=5):
+                return "expired"
+            if now > expiry - timedelta(hours=24):
+                return "expiring"
+            return "ok"
+        except Exception:
+            pass
+    # 폴백: last_refresh + 240h
     lr = auth.get("last_refresh")
     if not lr:
         return "expired"
     try:
         dt = datetime.strptime(lr[:19], "%Y-%m-%dT%H:%M:%S")
         expiry = dt + timedelta(hours=240)
-        now = datetime.utcnow()
         if now > expiry - timedelta(minutes=5):
             return "expired"
         if now > expiry - timedelta(hours=24):
