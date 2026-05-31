@@ -202,6 +202,8 @@ def fetch_codex_usage(auth: dict) -> dict | None:
                 "Authorization": f"Bearer {access_token}",
                 "ChatGPT-Account-Id": account_id,
                 "User-Agent": "codex-cli/0.128.0",
+                # WAF가 originator 헤더 없는 요청을 403 차단 → codex CLI와 동일 헤더 전송
+                "originator": "codex_cli_rs",
             },
         )
         with urllib.request.urlopen(req, timeout=5) as r:

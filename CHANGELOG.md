@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.3] - 2026-05-31
+
+### Fixed
+- **Codex 사용량(`남은 %`) 미표시 수정** — `fetch_codex_usage`의 `/backend-api/codex/usage` 호출이 `403 Forbidden`으로 차단되어 `list` / `switch` UI에 사용량이 안 뜨던 문제. OpenAI WAF가 `originator` 헤더 없는 요청을 봇으로 간주해 차단함이 원인. codex CLI와 동일하게 `originator: codex_cli_rs` 헤더를 추가해 통과.
+
 ## [2.5.2] - 2026-05-31
 
 ### Fixed
