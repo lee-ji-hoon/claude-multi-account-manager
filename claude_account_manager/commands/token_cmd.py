@@ -62,6 +62,12 @@ def _safe_refresh_credential(credential_path, acc_id, skip_fresh_check=False):
     Returns:
         tuple: (new_credential or None, error_message or None)
     """
+    # cc-fleet single-owner refresh: 컨테이너가 refresh owner인 계정은 mac 자동 회전 skip.
+    # 단일 choke-point — cmd_refresh_all / cmd_refresh_expiring(매 프롬프트 hook) / switch 모든 경로 커버.
+    if acc_id in _cc_fleet_accounts():
+        log("INFO", f"[{acc_id}] cc-fleet 전용 → refresh skip (single-owner)")
+        return None, "skip:fleet"
+
     lock_path = credential_path.parent / f"{credential_path.name}.lock"
     lock_fd = None
 
@@ -246,6 +252,21 @@ def _auto_migrate(index, current):
         save_index(index)
 
 
+def _cc_fleet_accounts():
+    """cc-fleet single-owner refresh: **현재 lease된**(컨테이너가 refresh owner인) 계정 집합.
+    lease 중인 계정만 mac 자동 refresh에서 제외(토큰 회전 충돌 방지). down 상태(lease 없음)면
+    mac이 정상 refresh → 다음 up 위해 토큰 신선 유지(무조건 제외 시 down 토큰이 썩는 순환 회피).
+    데이터 소스=~/cc-fleet/lease/<id>.lock (없으면 빈 집합 — 영향 0)."""
+    import os, glob
+    out = set()
+    try:
+        for p in glob.glob(os.path.expanduser("~/cc-fleet/lease/*.lock")):
+            out.add(os.path.basename(p)[:-5])  # strip ".lock"
+    except Exception:
+        pass
+    return out
+
+
 def cmd_refresh_all():
     """모든 등록된 계정의 토큰 갱신 (Hook용, 비대화형)
 
@@ -272,8 +293,14 @@ def cmd_refresh_all():
     refreshed_count = 0
     skipped_count = 0
     error_count = 0
+    fleet = _cc_fleet_accounts()
 
     for acc in index["accounts"]:
+        # cc-fleet single-owner refresh: fleet 전용 계정은 컨테이너가 refresh owner → mac skip
+        if acc.get("id") in fleet:
+            log("INFO", f"[{acc.get('id')}] cc-fleet 전용 → refresh skip (single-owner)")
+            skipped_count += 1
+            continue
         credential_file = acc.get("credentialFile")
         if not credential_file:
             continue
@@ -427,6 +454,11 @@ def cmd_refresh_expiring(hours=1):
     if current:
         for acc in index["accounts"]:
             if is_same_account(acc, current):
+                # cc-fleet single-owner: fleet 계정이 현재 전역계정이어도 컨테이너가 owner →
+                # Keychain→파일 동기화 skip (choke-point를 안 타는 current-account 경로 가드).
+                if acc.get("id") in _cc_fleet_accounts():
+                    log("INFO", f"[{acc['id']}] cc-fleet 전용 → current Keychain 동기화 skip (single-owner)")
+                    continue
                 credential_file = acc.get("credentialFile")
                 if credential_file:
                     credential_path = ACCOUNTS_DIR / credential_file

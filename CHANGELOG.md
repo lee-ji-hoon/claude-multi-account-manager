@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.5.2] - 2026-07-08
 
 ### Fixed
 - **credential 교차 오염 수정** — switch나 `/login` 직후 `~/.claude.json`(oauthAccount)과 Keychain이 잠깐 어긋나는 desync 윈도우에, hook이 Keychain의 새 계정 토큰을 이전 계정 슬롯에 저장하던 문제 (2026-07-08 실사고: gmail 토큰이 soop 슬롯에 저장되어 두 계정이 동일 사용량으로 표시됨)
@@ -11,9 +11,12 @@ All notable changes to this project will be documented in this file.
   - 소유자 불일치 또는 확인 불가 시 저장을 스킵하고 로그/메시지 출력 (fail-closed — 다음 hook에서 자동 재시도)
   - 동일 이메일이 여러 org에 속한 경우 org uuid까지 비교하여 org 단위 슬롯 구분 유지
 - **Max20 계정이 `Max5`로 표시되던 문제** — `_fetch_usage_from_api`의 planName 계산이 `subscriptionType: "max"`(숫자 없음)일 때 rateLimitTier를 무시하고 무조건 Max5로 표기. `detect_plan_from_credential`과 동일하게 rateLimitTier로 세분화
+- **계정 삭제 감사 로그 부재** — `account remove`가 실행돼도 누가/언제/어떤 상태의 계정을 지웠는지 기록이 없어 사후 추적이 불가능했음 (2026-07-08: `dlwlgns1240_soop` 계정 항목이 원인 불명으로 두 차례 삭제됨). 삭제 확정 직후 계정 식별자·이메일·조직·credential 실존 여부·actor 컨텍스트(대화형 여부, 부모 프로세스 id, 세션 id)를 `token-refresh.log`에 WARN으로 기록 (Claude/Codex 삭제 경로 모두)
 
 ### Added
 - `tests/test_owner_guard.py` — 소유자 검증 단위 테스트 + 교차 오염 시나리오 회귀 테스트 (오프라인, 전부 mock)
+- `tests/test_remove_audit.py` — 계정 삭제 감사 로깅 회귀 테스트 (반쪽 상태 삭제 시나리오 포함)
+- cc-fleet single-owner refresh (`_cc_fleet_accounts`) — 이전 릴리즈 이후 설치 캐시에만 존재하던 핫패치를 git 이력에 포팅 (컨테이너가 refresh owner로 lease 중인 계정은 mac 쪽 자동 토큰 회전을 skip해 회전 충돌 방지)
 
 ## [2.5.1] - 2026-05-13
 

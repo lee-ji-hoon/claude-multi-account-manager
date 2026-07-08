@@ -2,6 +2,8 @@
 cmd_remove: Remove registered accounts
 """
 import json
+import os
+import sys
 
 from ..config import ACCOUNTS_DIR
 from ..ui import c, Colors
@@ -10,6 +12,19 @@ from ..account import is_same_account, _is_real_org
 from ..codex_provider import (
     is_codex_available, load_codex_index, get_current_codex_account_id, remove_codex_account,
 )
+from ..logger import log
+
+
+def _remove_actor():
+    """삭제 실행 주체 식별 (감사 로깅용)
+
+    누가/어떤 경로로 remove를 호출했는지는 프로세스 정보만으로 완전히 알 수 없지만,
+    최소한 대화형 여부와 셸 컨텍스트는 남겨 사후 추적을 돕는다
+    (2026-07-08 실사고: 반쪽 계정 항목이 원인 불명으로 두 차례 삭제됨).
+    """
+    interactive = "interactive" if sys.stdin.isatty() else "non-interactive"
+    session = os.environ.get("CLAUDE_SESSION_ID", "") or os.environ.get("TERM_SESSION_ID", "unknown")
+    return f"{interactive}, ppid={os.getppid()}, session={session}"
 
 
 def cmd_remove(account_id=None):
@@ -89,6 +104,7 @@ def cmd_remove(account_id=None):
                 if confirm not in ('y', 'yes'):
                     print("취소됨")
                     return False
+                log("WARN", f"[codex:{codex_acc.get('id','?')}] 계정 삭제 실행 ({codex_acc.get('email','?')}, actor={_remove_actor()})")
                 ok, result = remove_codex_account(codex_acc)
                 if ok:
                     print(f"계정 삭제 완료: {codex_acc['name']} (Codex)")
@@ -131,6 +147,14 @@ def cmd_remove(account_id=None):
     if confirm not in ('y', 'yes'):
         print("취소됨")
         return False
+
+    # 감사 로깅: 삭제 직전 who/what/when 기록 (사후 추적용)
+    # credential 파일 실존 여부까지 남긴다 — "credentialFile 없음"으로 반쪽 상태였던 계정이
+    # 삭제된 것인지, 정상 상태에서 삭제된 것인지 사후 구분 가능해야 한다 (2026-07-08 실사고).
+    cred_file = account.get("credentialFile")
+    cred_exists = bool(cred_file) and (ACCOUNTS_DIR / cred_file).exists()
+    log("WARN", f"[{account_id}] 계정 삭제 실행 ({account.get('email','?')} @ {account.get('organizationName','-')}, "
+                f"credential={'있음' if cred_exists else '없음'}, actor={_remove_actor()})")
 
     # Remove profile file
     profile_path = ACCOUNTS_DIR / account["profileFile"]
