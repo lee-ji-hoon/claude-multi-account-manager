@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.5] - 2026-07-08
+
+### Fixed
+- **`CLAUDE_CONFIG_DIR`이 설정된 세션에서 hook/alias가 엉뚱한 Keychain을 참조하던 문제** — 이 플러그인의 계정 저장소(`~/.claude/accounts`)는 `CLAUDE_CONFIG_DIR`과 무관하게 항상 고정 경로인데(`config.py`), `keychain.py`의 Keychain 조회는 `CLAUDE_CONFIG_DIR`을 반영해 서비스명이 갈린다. 커스텀 config-dir로 실행되는 세션(예: 플러그인 로드를 줄이려는 프로필 전환 스크립트)에서 SessionStart/PromptSubmit hook이 돌면, 공유 저장소에 그 프로필 전용(별도) Keychain의 토큰이 쓰여 계정이 뒤섞이는 원인이 됐다.
+  - `hooks-handlers/session-start.sh` / `prompt-submit.sh`: `account_manager.py` 호출 전 `CLAUDE_CONFIG_DIR`을 명시적으로 unset
+  - 터미널 alias(`_account_mgr_run`, `account`/`account-switch`/`account-list`) 생성 블록도 동일하게 unset 하도록 갱신, 마커 버전 v2 → v3 (기존 v1/v2 설치는 세션 시작 시 자동 마이그레이션, 사용자 설정 앞뒤 내용 보존)
+  - `tests/test_hooks_shell.sh` 추가 — hook의 unset 동작 + v2→v3 자동 교체 + idempotency 회귀 테스트 (bash, 12케이스)
+
 ## [2.5.4] - 2026-07-08
 
 ### Fixed

@@ -6,6 +6,13 @@
 SCRIPT_DIR="$(dirname "$(dirname "$0")")"
 LOG_DIR="$HOME/.claude/accounts/logs"
 mkdir -p "$LOG_DIR"
+
+# 이 플러그인의 계정 저장소(~/.claude/accounts)는 CLAUDE_CONFIG_DIR과 무관하게 항상 고정 경로다
+# (config.py). 그런데 keychain.py의 Keychain 조회는 CLAUDE_CONFIG_DIR을 반영해 서비스명이
+# 갈린다 — CLAUDE_CONFIG_DIR이 설정된 세션(예: 커스텀 프로필로 실행된 Claude Code)에서 이 hook이
+# 돌면 공유 저장소에는 엉뚱한(그 프로필 전용) Keychain의 토큰이 쓰인다. hook은 항상 기본
+# Keychain 네임스페이스를 봐야 저장소 가정과 일치한다.
+unset CLAUDE_CONFIG_DIR
 python3 "$SCRIPT_DIR/account_manager.py" auto-add 2>>"$LOG_DIR/token-refresh.log"
 
 # 터미널 alias 자동 설정 (마커 기반 블록 관리, version-agnostic)
@@ -23,7 +30,7 @@ fi
 
 MARKER_BEGIN="# >>> account-manager >>>"
 MARKER_END="# <<< account-manager <<<"
-BLOCK_VERSION_TAG="# account-manager-block: v2"
+BLOCK_VERSION_TAG="# account-manager-block: v3"
 
 write_v2_block() {
     local rc="$1"
@@ -40,7 +47,9 @@ write_v2_block() {
         echo "        echo \"account: plugin not found in \$base\" >&2"
         echo "        return 1"
         echo "    fi"
-        echo "    python3 \"\$base/\$latest/account_manager.py\" \"\$@\""
+        echo "    # 계정 저장소는 CLAUDE_CONFIG_DIR과 무관하게 고정 경로 — 커스텀 프로필로 실행 중인"
+        echo "    # 셸에서 호출돼도 항상 기본 Keychain 네임스페이스를 보게 강제(v3)"
+        echo "    ( unset CLAUDE_CONFIG_DIR; python3 \"\$base/\$latest/account_manager.py\" \"\$@\" )"
         echo "}"
         echo "alias account='_account_mgr_run'"
         echo "alias account-switch='_account_mgr_run switch'"
@@ -51,11 +60,11 @@ write_v2_block() {
 
 if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
     if grep -q "$MARKER_BEGIN" "$SHELL_RC" 2>/dev/null; then
-        # 마커 블록 존재 → v2 여부 확인
+        # 마커 블록 존재 → 최신 버전 여부 확인
         if grep -q "$BLOCK_VERSION_TAG" "$SHELL_RC" 2>/dev/null; then
-            : # 이미 v2 → 재설치/업데이트에도 손댈 필요 없음
+            : # 이미 최신 → 재설치/업데이트에도 손댈 필요 없음
         else
-            # v1 (경로 박힌 alias) → v2로 교체
+            # 구버전(v1/v2) → 최신으로 교체
             sed -i '' "/$MARKER_BEGIN/,/$MARKER_END/d" "$SHELL_RC"
             write_v2_block "$SHELL_RC"
         fi
