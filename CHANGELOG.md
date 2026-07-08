@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **credential 교차 오염 수정** — switch나 `/login` 직후 `~/.claude.json`(oauthAccount)과 Keychain이 잠깐 어긋나는 desync 윈도우에, hook이 Keychain의 새 계정 토큰을 이전 계정 슬롯에 저장하던 문제 (2026-07-08 실사고: gmail 토큰이 soop 슬롯에 저장되어 두 계정이 동일 사용량으로 표시됨)
+  - `owner.py` 신설: `/api/oauth/profile`로 토큰 실소유 계정(uuid/email/org)을 확인, 토큰 해시 키로 캐시 (신규 토큰당 API 1회)
+  - Keychain credential을 슬롯 파일에 쓰는 5개 경로 전부에 소유자 검증 가드 추가: `cmd_refresh_all`(현재 계정 저장), `cmd_refresh_expiring`(Keychain→파일 동기화), `_auto_migrate`(credential 복구), `cmd_add`(토큰만 갱신 + 신규 저장), `cmd_auto_add`
+  - 소유자 불일치 또는 확인 불가 시 저장을 스킵하고 로그/메시지 출력 (fail-closed — 다음 hook에서 자동 재시도)
+  - 동일 이메일이 여러 org에 속한 경우 org uuid까지 비교하여 org 단위 슬롯 구분 유지
+- **Max20 계정이 `Max5`로 표시되던 문제** — `_fetch_usage_from_api`의 planName 계산이 `subscriptionType: "max"`(숫자 없음)일 때 rateLimitTier를 무시하고 무조건 Max5로 표기. `detect_plan_from_credential`과 동일하게 rateLimitTier로 세분화
+
+### Added
+- `tests/test_owner_guard.py` — 소유자 검증 단위 테스트 + 교차 오염 시나리오 회귀 테스트 (오프라인, 전부 mock)
+
 ## [2.5.1] - 2026-05-13
 
 ### Removed

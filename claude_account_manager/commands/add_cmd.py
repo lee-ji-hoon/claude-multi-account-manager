@@ -11,6 +11,7 @@ from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
 from ..keychain import get_keychain_credential
 from ..account import detect_plan_from_credential, generate_account_name, generate_account_id, is_account_duplicate, get_org_info, _is_real_org
+from ..owner import credential_matches_identity, credential_matches_slot
 from ..token import is_credential_valid
 
 
@@ -95,6 +96,16 @@ def cmd_add(name=None):
             # 기존 계정 토큰만 갱신
             credential = get_keychain_credential()
             if credential and is_credential_valid(credential):
+                # 소유자 검증: Keychain 토큰이 이 슬롯 계정 소유일 때만 저장 (교차 오염 방지)
+                owner_ok = credential_matches_slot(credential, acc)
+                if owner_ok is not True:
+                    print()
+                    if owner_ok is False:
+                        print(c(Colors.RED, "  Keychain 토큰이 이 계정 소유가 아닙니다 (다른 계정 전환/로그인 직후일 수 있음)."))
+                        print(c(Colors.DIM, "  이 계정으로 /login 후 다시 시도하세요."))
+                    else:
+                        print(c(Colors.YELLOW, "  토큰 소유자를 확인할 수 없습니다 (네트워크). 잠시 후 다시 시도하세요."))
+                    return False
                 credential_path = ACCOUNTS_DIR / acc.get("credentialFile", f"credential_{acc['id']}.json")
                 credential_path.write_text(json.dumps(credential, indent=2, ensure_ascii=False))
                 os.chmod(credential_path, 0o600)
@@ -185,9 +196,18 @@ def cmd_add(name=None):
     credential = get_keychain_credential()
     has_credential = False
     if credential and is_credential_valid(credential):
-        credential_path.write_text(json.dumps(credential, indent=2, ensure_ascii=False))
-        os.chmod(credential_path, 0o600)
-        has_credential = True
+        # 소유자 검증: Keychain 토큰이 현재 계정 소유일 때만 저장 (교차 오염 방지)
+        owner_ok = credential_matches_identity(
+            credential, email,
+            account_uuid=current.get("accountUuid", ""),
+            org_uuid=org_uuid,
+        )
+        if owner_ok is not True:
+            print(c(Colors.YELLOW, "  Keychain 토큰 소유자가 현재 계정과 불일치하거나 확인 불가 → 토큰 저장을 건너뜁니다."))
+        else:
+            credential_path.write_text(json.dumps(credential, indent=2, ensure_ascii=False))
+            os.chmod(credential_path, 0o600)
+            has_credential = True
     elif credential:
         print(c(Colors.YELLOW, "  Keychain credential이 불완전합니다. 토큰 저장을 건너뜁니다."))
 
@@ -261,6 +281,16 @@ def cmd_auto_add():
         return False
     if not is_credential_valid(credential):
         print("[auto-add] credential이 불완전합니다 (토큰 갱신 중일 수 있음).", file=sys.stderr)
+        return False
+
+    # 소유자 검증: switch나 /login 직후 desync 윈도우에 다른 계정 토큰으로 등록되는 것 방지
+    owner_ok = credential_matches_identity(
+        credential, email,
+        account_uuid=current.get("accountUuid", ""),
+        org_uuid=org_uuid,
+    )
+    if owner_ok is not True:
+        print("[auto-add] Keychain 토큰 소유자가 현재 계정과 불일치/확인불가 → 등록 스킵 (다음 세션 재시도)", file=sys.stderr)
         return False
 
     plan = detect_plan_from_credential(credential)
