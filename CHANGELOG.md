@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.5.2] - 2026-07-08
+## [2.5.4] - 2026-07-08
 
 ### Fixed
 - **credential 교차 오염 수정** — switch나 `/login` 직후 `~/.claude.json`(oauthAccount)과 Keychain이 잠깐 어긋나는 desync 윈도우에, hook이 Keychain의 새 계정 토큰을 이전 계정 슬롯에 저장하던 문제 (2026-07-08 실사고: gmail 토큰이 soop 슬롯에 저장되어 두 계정이 동일 사용량으로 표시됨)
@@ -17,6 +17,18 @@ All notable changes to this project will be documented in this file.
 - `tests/test_owner_guard.py` — 소유자 검증 단위 테스트 + 교차 오염 시나리오 회귀 테스트 (오프라인, 전부 mock)
 - `tests/test_remove_audit.py` — 계정 삭제 감사 로깅 회귀 테스트 (반쪽 상태 삭제 시나리오 포함)
 - cc-fleet single-owner refresh (`_cc_fleet_accounts`) — 이전 릴리즈 이후 설치 캐시에만 존재하던 핫패치를 git 이력에 포팅 (컨테이너가 refresh owner로 lease 중인 계정은 mac 쪽 자동 토큰 회전을 skip해 회전 충돌 방지)
+
+## [2.5.3] - 2026-05-31
+
+### Fixed
+- **Codex 사용량(`남은 %`) 미표시 수정** — `fetch_codex_usage`의 `/backend-api/codex/usage` 호출이 `403 Forbidden`으로 차단되어 `list` / `switch` UI에 사용량이 안 뜨던 문제. OpenAI WAF가 `originator` 헤더 없는 요청을 봇으로 간주해 차단함이 원인. codex CLI와 동일하게 `originator: codex_cli_rs` 헤더를 추가해 통과.
+
+## [2.5.2] - 2026-05-31
+
+### Fixed
+- **Codex 토큰 만료 오표시 수정** — `account switch` / `list` UI에서 정상 작동하는 Codex 계정이 `⚠만료`로 잘못 표시되던 문제. `get_codex_token_status`가 저장된 사본(`accounts/auth_{id}.json`)의 오래된 `last_refresh` + 240h 고정 윈도우를 기준으로 판정해, Codex CLI가 실제로는 토큰을 갱신했는데도 만료로 표시되던 괴리.
+  - 현재 활성 계정이면 `~/.codex/auth.json`(Codex CLI가 자동 갱신)을 기준으로 판정
+  - 임의의 240h 윈도우 대신 access_token JWT의 실제 `exp`를 사용 (exp 없으면 기존 `last_refresh + 240h`로 폴백)
 
 ## [2.5.1] - 2026-05-13
 
