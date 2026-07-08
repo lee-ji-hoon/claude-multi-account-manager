@@ -13,6 +13,7 @@ from ..keychain import get_keychain_credential
 from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon, is_token_expired, is_token_fresh, is_credential_valid, classify_refresh_error, RefreshError
 from ..api import _fetch_usage_from_api
 from ..account import detect_plan_from_credential, is_same_account
+from ..owner import credential_matches_slot
 from ..logger import log, log_token_info
 
 
@@ -61,6 +62,12 @@ def _safe_refresh_credential(credential_path, acc_id, skip_fresh_check=False):
     Returns:
         tuple: (new_credential or None, error_message or None)
     """
+    # cc-fleet single-owner refresh: 컨테이너가 refresh owner인 계정은 mac 자동 회전 skip.
+    # 단일 choke-point — cmd_refresh_all / cmd_refresh_expiring(매 프롬프트 hook) / switch 모든 경로 커버.
+    if acc_id in _cc_fleet_accounts():
+        log("INFO", f"[{acc_id}] cc-fleet 전용 → refresh skip (single-owner)")
+        return None, "skip:fleet"
+
     lock_path = credential_path.parent / f"{credential_path.name}.lock"
     lock_fd = None
 
@@ -219,18 +226,21 @@ def _auto_migrate(index, current):
             cred_path = ACCOUNTS_DIR / cred_file
 
             if current and is_same_account(acc, current):
-                # 현재 활성 계정: Keychain에서 credential 저장
+                # 현재 활성 계정: Keychain에서 credential 저장 (소유자 검증 후)
                 keychain_cred = get_keychain_credential()
                 if keychain_cred and is_credential_valid(keychain_cred):
-                    with open(cred_path, 'w', encoding='utf-8') as f:
-                        f.write(json.dumps(keychain_cred, indent=2, ensure_ascii=False))
-                        f.flush()
-                        os.fsync(f.fileno())
-                    os.chmod(cred_path, 0o600)
-                    acc["credentialFile"] = cred_file
-                    migrated = True
-                    log("INFO", f"[migrate] {acc['id']}: credential 파일 생성 (keychain)")
-                    print(f"[migrate] {acc['id']}: credential 저장됨")
+                    if credential_matches_slot(keychain_cred, acc) is not True:
+                        log("WARN", f"[migrate] {acc['id']}: Keychain 토큰 소유자 불일치/확인불가 → credential 생성 스킵")
+                    else:
+                        with open(cred_path, 'w', encoding='utf-8') as f:
+                            f.write(json.dumps(keychain_cred, indent=2, ensure_ascii=False))
+                            f.flush()
+                            os.fsync(f.fileno())
+                        os.chmod(cred_path, 0o600)
+                        acc["credentialFile"] = cred_file
+                        migrated = True
+                        log("INFO", f"[migrate] {acc['id']}: credential 파일 생성 (keychain)")
+                        print(f"[migrate] {acc['id']}: credential 저장됨")
             elif cred_path.exists():
                 # 비활성 계정: 디스크에 파일이 있으면 index만 복구
                 acc["credentialFile"] = cred_file
@@ -240,6 +250,21 @@ def _auto_migrate(index, current):
 
     if migrated:
         save_index(index)
+
+
+def _cc_fleet_accounts():
+    """cc-fleet single-owner refresh: **현재 lease된**(컨테이너가 refresh owner인) 계정 집합.
+    lease 중인 계정만 mac 자동 refresh에서 제외(토큰 회전 충돌 방지). down 상태(lease 없음)면
+    mac이 정상 refresh → 다음 up 위해 토큰 신선 유지(무조건 제외 시 down 토큰이 썩는 순환 회피).
+    데이터 소스=~/cc-fleet/lease/<id>.lock (없으면 빈 집합 — 영향 0)."""
+    import os, glob
+    out = set()
+    try:
+        for p in glob.glob(os.path.expanduser("~/cc-fleet/lease/*.lock")):
+            out.add(os.path.basename(p)[:-5])  # strip ".lock"
+    except Exception:
+        pass
+    return out
 
 
 def cmd_refresh_all():
@@ -268,8 +293,14 @@ def cmd_refresh_all():
     refreshed_count = 0
     skipped_count = 0
     error_count = 0
+    fleet = _cc_fleet_accounts()
 
     for acc in index["accounts"]:
+        # cc-fleet single-owner refresh: fleet 전용 계정은 컨테이너가 refresh owner → mac skip
+        if acc.get("id") in fleet:
+            log("INFO", f"[{acc.get('id')}] cc-fleet 전용 → refresh skip (single-owner)")
+            skipped_count += 1
+            continue
         credential_file = acc.get("credentialFile")
         if not credential_file:
             continue
@@ -284,6 +315,18 @@ def cmd_refresh_all():
                 # 유효성 검증: 불완전한 credential 저장 방지
                 if not is_credential_valid(current_credential):
                     log("WARN", f"[{acc['id']}] Keychain credential 불완전 → 파일 저장 스킵")
+                    skipped_count += 1
+                    continue
+
+                # 소유자 검증: switch나 /login 직후 claude.json↔Keychain desync 윈도우에
+                # 다른 계정 토큰이 이 슬롯에 저장되는 교차 오염 방지
+                owner_ok = credential_matches_slot(current_credential, acc)
+                if owner_ok is not True:
+                    if owner_ok is False:
+                        log("WARN", f"[{acc['id']}] Keychain 토큰 소유자 불일치 → 저장 스킵 (교차 오염 방지)")
+                        print(f"[refresh] {acc['id']}: Keychain 토큰이 다른 계정 소유 → 저장 스킵")
+                    else:
+                        log("WARN", f"[{acc['id']}] 토큰 소유자 확인 불가 → 저장 스킵 (다음 세션 재시도)")
                     skipped_count += 1
                     continue
 
@@ -411,6 +454,11 @@ def cmd_refresh_expiring(hours=1):
     if current:
         for acc in index["accounts"]:
             if is_same_account(acc, current):
+                # cc-fleet single-owner: fleet 계정이 현재 전역계정이어도 컨테이너가 owner →
+                # Keychain→파일 동기화 skip (choke-point를 안 타는 current-account 경로 가드).
+                if acc.get("id") in _cc_fleet_accounts():
+                    log("INFO", f"[{acc['id']}] cc-fleet 전용 → current Keychain 동기화 skip (single-owner)")
+                    continue
                 credential_file = acc.get("credentialFile")
                 if credential_file:
                     credential_path = ACCOUNTS_DIR / credential_file
@@ -423,15 +471,19 @@ def cmd_refresh_expiring(hours=1):
                         except (json.JSONDecodeError, IOError, FileNotFoundError):
                             file_expires = 0
                         if kc_expires > file_expires:
-                            try:
-                                with open(credential_path, 'w', encoding='utf-8') as f:
-                                    f.write(json.dumps(kc_cred, indent=2, ensure_ascii=False))
-                                    f.flush()
-                                    os.fsync(f.fileno())
-                                os.chmod(credential_path, 0o600)
-                                log("INFO", f"[{acc['id']}] Keychain → 파일 credential 동기화")
-                            except Exception as e:
-                                log("WARN", f"[{acc['id']}] credential 동기화 실패: {e}")
+                            # 소유자 검증: desync 윈도우 교차 오염 방지 (cmd_refresh_all과 동일)
+                            if credential_matches_slot(kc_cred, acc) is not True:
+                                log("WARN", f"[{acc['id']}] Keychain 토큰 소유자 불일치/확인불가 → 동기화 스킵")
+                            else:
+                                try:
+                                    with open(credential_path, 'w', encoding='utf-8') as f:
+                                        f.write(json.dumps(kc_cred, indent=2, ensure_ascii=False))
+                                        f.flush()
+                                        os.fsync(f.fileno())
+                                    os.chmod(credential_path, 0o600)
+                                    log("INFO", f"[{acc['id']}] Keychain → 파일 credential 동기화")
+                                except Exception as e:
+                                    log("WARN", f"[{acc['id']}] credential 동기화 실패: {e}")
                 break
 
     for acc in index["accounts"]:

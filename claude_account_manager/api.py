@@ -255,7 +255,9 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
             num = int(match.group(1))
             plan_name = "Max20" if num >= 20 else "Max5"
         else:
-            plan_name = "Max5"
+            # subscriptionType이 "max"만이면 rateLimitTier로 세분화 (Max20 → Max5 오표기 방지)
+            rate_limit_tier = credential.get("claudeAiOauth", {}).get("rateLimitTier", "").lower()
+            plan_name = "Max20" if ("max_20" in rate_limit_tier or "max20" in rate_limit_tier) else "Max5"
     elif "pro" in sub_lower:
         plan_name = "Pro"
     elif not subscription_type or "api" in sub_lower:
