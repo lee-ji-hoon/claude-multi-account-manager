@@ -160,9 +160,12 @@ Update the marketplace clone and request the plugin update:
 
 ```bash
 bash -euo pipefail <<'SH'
+test -z "$(git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" status --porcelain)" || { echo "ERROR: marketplace checkout is not clean" >&2; exit 1; }
 git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" fetch origin '+refs/heads/main:refs/remotes/origin/main'
 git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" checkout main
 git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" merge --ff-only origin/main
+test "$(git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" rev-parse HEAD)" = "$(git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" rev-parse origin/main)" || { echo "ERROR: local marketplace main differs from origin/main" >&2; exit 1; }
+test -z "$(git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" status --porcelain)" || { echo "ERROR: marketplace checkout is not clean" >&2; exit 1; }
 SH
 ```
 

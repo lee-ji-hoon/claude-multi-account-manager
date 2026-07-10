@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -9,12 +10,65 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEVELOP_REFSPEC = "+refs/heads/develop:refs/remotes/origin/develop"
 MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"
+MARKETPLACE_PATH = '$HOME/.claude/plugins/marketplaces/lee-ji-hoon'
+MARKETPLACE_CLEAN_GUARD = (
+    'test -z "$(git -C "'
+    + MARKETPLACE_PATH
+    + '" status --porcelain)" || '
+    + '{ echo "ERROR: marketplace checkout is not clean" >&2; exit 1; }'
+)
+MARKETPLACE_EQUALITY_GUARD = (
+    'test "$(git -C "'
+    + MARKETPLACE_PATH
+    + '" rev-parse HEAD)" = "$(git -C "'
+    + MARKETPLACE_PATH
+    + '" rev-parse origin/main)" || '
+    + '{ echo "ERROR: local marketplace main differs from origin/main" >&2; exit 1; }'
+)
 
 
 def run_git(*args, check=True):
     return subprocess.run(
         ["git"] + list(args),
         check=check,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def create_single_branch_marketplace_fixture(root):
+    origin = root / "origin.git"
+    seed = root / "seed"
+    home = root / "home"
+    clone = home / ".claude" / "plugins" / "marketplaces" / "lee-ji-hoon"
+
+    run_git("init", "--bare", "-q", str(origin))
+    run_git("init", "-q", "-b", "main", str(seed))
+    run_git("-C", str(seed), "config", "user.name", "test")
+    run_git("-C", str(seed), "config", "user.email", "test@example.invalid")
+    run_git("-C", str(seed), "commit", "-q", "--allow-empty", "-m", "initial")
+    run_git("-C", str(seed), "remote", "add", "origin", str(origin))
+    run_git("-C", str(seed), "push", "-q", "origin", "main")
+    clone.parent.mkdir(parents=True)
+    run_git(
+        "clone",
+        "-q",
+        "--single-branch",
+        "--branch",
+        "main",
+        str(origin),
+        str(clone),
+    )
+    return origin, seed, home, clone
+
+
+def run_release_block(block, home):
+    return subprocess.run(
+        ["bash"],
+        check=False,
+        env=dict(os.environ, HOME=str(home)),
+        input=block,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -289,13 +343,61 @@ class VersionContractTests(unittest.TestCase):
             self,
             marketplace,
             [
+                MARKETPLACE_CLEAN_GUARD,
                 "git -C \"$HOME/.claude/plugins/marketplaces/lee-ji-hoon\" fetch origin '{}'".format(
                     MAIN_REFSPEC
                 ),
                 'git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" checkout main',
                 'git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" merge --ff-only origin/main',
+                MARKETPLACE_EQUALITY_GUARD,
+                MARKETPLACE_CLEAN_GUARD,
             ],
         )
+
+    def test_marketplace_cache_block_rejects_dirty_checkout_before_fetch(self):
+        marketplace = block_containing(
+            read_release_skill(),
+            'git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" checkout main',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            _, seed, home, clone = create_single_branch_marketplace_fixture(Path(tmp))
+            initial_sha = run_git("-C", str(clone), "rev-parse", "HEAD").stdout.strip()
+            run_git("-C", str(seed), "commit", "-q", "--allow-empty", "-m", "remote")
+            run_git("-C", str(seed), "push", "-q", "origin", "main")
+            (clone / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+
+            result = run_release_block(marketplace, home)
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertEqual(
+                initial_sha,
+                run_git("-C", str(clone), "rev-parse", "HEAD").stdout.strip(),
+                "dirty checkout must fail before merge mutation",
+            )
+            self.assertEqual(
+                initial_sha,
+                run_git("-C", str(clone), "rev-parse", "origin/main").stdout.strip(),
+                "dirty checkout must fail before fetch mutation",
+            )
+
+    def test_marketplace_cache_block_rejects_local_main_ahead(self):
+        marketplace = block_containing(
+            read_release_skill(),
+            'git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" checkout main',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            _, _, home, clone = create_single_branch_marketplace_fixture(Path(tmp))
+            run_git("-C", str(clone), "config", "user.name", "test")
+            run_git("-C", str(clone), "config", "user.email", "test@example.invalid")
+            run_git("-C", str(clone), "commit", "-q", "--allow-empty", "-m", "local-ahead")
+
+            result = run_release_block(marketplace, home)
+
+            self.assertNotEqual(
+                0,
+                result.returncode,
+                "clean local-ahead main must fail exact remote equality",
+            )
 
     def test_skill_develop_refspec_materializes_tracking_ref_in_single_branch_clone(self):
         release = read_release_skill()
