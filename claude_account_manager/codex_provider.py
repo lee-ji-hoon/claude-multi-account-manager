@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Codex 계정 통합 브리지 — ~/.codex/auth.json 읽기/쓰기"""
 from pathlib import Path
 import json, os
