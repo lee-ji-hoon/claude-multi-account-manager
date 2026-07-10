@@ -111,6 +111,21 @@ def ensure_fragment(path: Optional[Path] = None) -> bool:
 
 def is_git_tracked(path: Path) -> bool:
     actual_path = Path(path).resolve()
+    git_metadata_found = False
+    for directory in (actual_path.parent,) + tuple(actual_path.parent.parents):
+        marker = directory / ".git"
+        try:
+            marker.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return True
+        git_metadata_found = True
+        break
+
+    if not git_metadata_found:
+        return False
+
     try:
         worktree = subprocess.run(
             ["git", "-C", str(actual_path.parent), "rev-parse", "--show-toplevel"],
@@ -120,15 +135,18 @@ def is_git_tracked(path: Path) -> bool:
             text=True,
         )
     except OSError:
-        return False
+        return True
     if worktree.returncode != 0:
-        return False
+        return True
 
-    root = Path(worktree.stdout.strip()).resolve()
+    root_text = worktree.stdout.strip()
+    if not root_text:
+        return True
+    root = Path(root_text).resolve()
     try:
         relative_path = actual_path.relative_to(root)
     except ValueError:
-        return False
+        return True
 
     try:
         tracked = subprocess.run(
@@ -147,8 +165,10 @@ def is_git_tracked(path: Path) -> bool:
             stderr=subprocess.DEVNULL,
         )
     except OSError:
-        return False
-    return tracked.returncode == 0
+        return True
+    if tracked.returncode == 0:
+        return True
+    return tracked.returncode != 1
 
 
 def install_source_block(rc_path: Path) -> Literal["installed", "already", "unsafe"]:
@@ -185,7 +205,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     if len(args) == 2 and args[0] == "install-rc":
         result = install_source_block(Path(args[1]))
-        return 0 if result in ("installed", "already") else 1
+        return 3 if result == "unsafe" else 0
 
     print(
         "usage: shell_integration.py ensure-fragment\n"

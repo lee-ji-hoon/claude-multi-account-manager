@@ -173,6 +173,49 @@ class TestShellIntegration(unittest.TestCase):
             self.assertEqual(shell_integration.install_source_block(rc_path), "unsafe")
             self.assertEqual(rc_path.read_bytes(), original)
 
+    def test_install_source_block_refuses_when_git_probe_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            rc_path = repo / ".zshrc"
+            original = b"export SENTINEL=git-unavailable\n"
+            rc_path.write_bytes(original)
+            subprocess.run(["git", "-C", str(repo), "add", ".zshrc"], check=True)
+
+            with mock.patch.object(shell_integration.subprocess, "run", side_effect=FileNotFoundError("git")):
+                self.assertEqual(shell_integration.install_source_block(rc_path), "unsafe")
+
+            self.assertEqual(rc_path.read_bytes(), original)
+
+    def test_install_source_block_refuses_when_worktree_probe_is_untrusted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            rc_path = repo / ".zshrc"
+            original = b"export SENTINEL=git-probe-error\n"
+            rc_path.write_bytes(original)
+
+            failed_probe = subprocess.CompletedProcess(
+                ["git", "rev-parse"],
+                128,
+                stdout="",
+            )
+            with mock.patch.object(shell_integration.subprocess, "run", return_value=failed_probe):
+                self.assertEqual(shell_integration.install_source_block(rc_path), "unsafe")
+
+            self.assertEqual(rc_path.read_bytes(), original)
+
+    def test_install_source_block_allows_proven_untracked_worktree_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            rc_path = repo / ".zshrc"
+            original = b"export SENTINEL=untracked\n"
+            rc_path.write_bytes(original)
+
+            self.assertEqual(shell_integration.install_source_block(rc_path), "installed")
+            self.assertEqual(rc_path.read_bytes(), original + shell_integration.SOURCE_BLOCK.encode())
+
     def test_unsafe_rc_with_exact_source_block_is_already_configured(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
@@ -185,6 +228,22 @@ class TestShellIntegration(unittest.TestCase):
             self.assertEqual(shell_integration.install_source_block(rc_path), "already")
             self.assertTrue(rc_path.is_symlink())
             self.assertEqual(target.read_bytes(), original)
+
+    def test_cli_install_rc_returns_3_for_unsafe_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            target = directory / "owned-zshrc"
+            target.write_bytes(b"export SENTINEL=target\n")
+            rc_path = directory / ".zshrc"
+            rc_path.symlink_to(target)
+
+            result = subprocess.run(
+                [sys.executable, str(PACKAGE_DIR / "shell_integration.py"), "install-rc", str(rc_path)],
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 3)
+            self.assertEqual(target.read_bytes(), b"export SENTINEL=target\n")
 
     def test_regular_rc_gets_exactly_one_source_block(self):
         with tempfile.TemporaryDirectory() as tmp:
