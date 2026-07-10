@@ -1,10 +1,24 @@
 import json
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+DEVELOP_REFSPEC = "+refs/heads/develop:refs/remotes/origin/develop"
+MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"
+
+
+def run_git(*args, check=True):
+    return subprocess.run(
+        ["git"] + list(args),
+        check=check,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
 
 def read_project_version():
@@ -134,9 +148,10 @@ class VersionContractTests(unittest.TestCase):
     def test_release_skill_orders_version_gate_and_publication(self):
         release = read_release_skill()
         required_in_order = [
+            "git fetch origin '{}'".format(DEVELOP_REFSPEC),
             "git checkout develop",
-            "git fetch origin develop",
-            "git pull --ff-only origin develop",
+            "git checkout -b develop --track origin/develop",
+            "git merge --ff-only origin/develop",
             'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"',
             'test -z "$(git status --porcelain)"',
             "remote tag",
@@ -152,16 +167,23 @@ class VersionContractTests(unittest.TestCase):
             "git add .claude-plugin/plugin.json .claude-plugin/marketplace.json pyproject.toml CHANGELOG.md",
             "git commit",
             "git push origin develop",
+            "git fetch origin '{}'".format(DEVELOP_REFSPEC),
+            'test "$(git rev-parse origin/develop)" = "$RELEASE_SHA"',
+            "git fetch origin '{}'".format(MAIN_REFSPEC),
             "git checkout main",
-            "git fetch origin main",
-            "git pull --ff-only origin main",
+            "git merge --ff-only origin/main",
             'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"',
             'git merge --no-ff "$RELEASE_SHA" -m "Merge develop: v{version}"',
             "main HEAD",
             "git tag -a",
             "git push origin main",
+            "git fetch origin '{}'".format(MAIN_REFSPEC),
+            'test "$(git rev-parse origin/main)" = "$MAIN_SHA"',
             "git push origin v{version}",
             "marketplace clone",
+            "git -C \"$HOME/.claude/plugins/marketplaces/lee-ji-hoon\" fetch origin '{}'".format(
+                MAIN_REFSPEC
+            ),
             "$HOME/.claude/plugins/cache/lee-ji-hoon/account/{version}",
         ]
 
@@ -201,9 +223,10 @@ class VersionContractTests(unittest.TestCase):
             self,
             develop_block,
             [
+                "git fetch origin '{}'".format(DEVELOP_REFSPEC),
                 "git checkout develop",
-                "git fetch origin develop",
-                "git pull --ff-only origin develop",
+                "git checkout -b develop --track origin/develop",
+                "git merge --ff-only origin/develop",
                 'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"',
                 'test -z "$(git status --porcelain)"',
             ],
@@ -212,13 +235,138 @@ class VersionContractTests(unittest.TestCase):
             self,
             main_block,
             [
+                "git fetch origin '{}'".format(MAIN_REFSPEC),
                 "git checkout main",
-                "git fetch origin main",
-                "git pull --ff-only origin main",
+                "git merge --ff-only origin/main",
                 'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"',
                 'git merge --no-ff "$RELEASE_SHA" -m "Merge develop: v{version}"',
             ],
         )
+
+    def test_release_skill_supports_single_branch_fetch_configuration(self):
+        release = read_release_skill()
+        develop_block = block_containing(release, "git checkout develop")
+        publication = block_containing(release, 'git commit -m "release: v{version}"')
+        marketplace = block_containing(
+            release,
+            'git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" checkout main',
+        )
+
+        self.assertNotIn("git pull", develop_block)
+        self.assertNotIn("git pull", publication)
+        self.assertNotIn("git pull", marketplace)
+        self.assertNotIn("\ngit fetch origin develop\n", release)
+        self.assertNotIn("\ngit fetch origin main\n", release)
+        assert_markers_in_order(
+            self,
+            develop_block,
+            [
+                "git fetch origin '{}'".format(DEVELOP_REFSPEC),
+                "if git show-ref --verify --quiet refs/heads/develop; then",
+                "git checkout develop",
+                "git checkout -b develop --track origin/develop",
+                "git merge --ff-only origin/develop",
+                'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"',
+                'test -z "$(git status --porcelain)"',
+            ],
+        )
+        assert_markers_in_order(
+            self,
+            publication,
+            [
+                "git push origin develop",
+                "git fetch origin '{}'".format(DEVELOP_REFSPEC),
+                'test "$(git rev-parse origin/develop)" = "$RELEASE_SHA"',
+                "git fetch origin '{}'".format(MAIN_REFSPEC),
+                "git checkout main",
+                "git merge --ff-only origin/main",
+                'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"',
+                'git merge --no-ff "$RELEASE_SHA" -m "Merge develop: v{version}"',
+                'test "$(git rev-parse "$MAIN_SHA^2")" = "$RELEASE_SHA"',
+            ],
+        )
+        assert_markers_in_order(
+            self,
+            marketplace,
+            [
+                "git -C \"$HOME/.claude/plugins/marketplaces/lee-ji-hoon\" fetch origin '{}'".format(
+                    MAIN_REFSPEC
+                ),
+                'git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" checkout main',
+                'git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" merge --ff-only origin/main',
+            ],
+        )
+
+    def test_skill_develop_refspec_materializes_tracking_ref_in_single_branch_clone(self):
+        release = read_release_skill()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            origin = root / "origin.git"
+            seed = root / "seed"
+            clone = root / "clone"
+
+            run_git("init", "--bare", "-q", str(origin))
+            run_git("init", "-q", "-b", "main", str(seed))
+            run_git("-C", str(seed), "config", "user.name", "test")
+            run_git("-C", str(seed), "config", "user.email", "test@example.invalid")
+            run_git("-C", str(seed), "commit", "-q", "--allow-empty", "-m", "initial")
+            run_git("-C", str(seed), "branch", "develop")
+            run_git("-C", str(seed), "remote", "add", "origin", str(origin))
+            run_git("-C", str(seed), "push", "-q", "origin", "main", "develop")
+            run_git(
+                "clone",
+                "-q",
+                "--single-branch",
+                "--branch",
+                "main",
+                str(origin),
+                str(clone),
+            )
+
+            fetch_config = run_git(
+                "-C", str(clone), "config", "--get-all", "remote.origin.fetch"
+            ).stdout.splitlines()
+            self.assertEqual([MAIN_REFSPEC], fetch_config)
+
+            run_git("-C", str(clone), "fetch", "-q", "origin", "develop")
+            plain_ref = run_git(
+                "-C",
+                str(clone),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                "refs/remotes/origin/develop",
+                check=False,
+            )
+            self.assertNotEqual(
+                0,
+                plain_ref.returncode,
+                "source-only fetch must reproduce the missing tracking ref",
+            )
+
+            refspec_match = re.search(re.escape(DEVELOP_REFSPEC), release)
+            self.assertIsNotNone(
+                refspec_match,
+                "release skill must carry the destination refspec used by this fixture",
+            )
+            skill_refspec = refspec_match.group(0)
+            run_git("-C", str(clone), "fetch", "-q", "origin", skill_refspec)
+            tracked = run_git(
+                "-C",
+                str(clone),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                "refs/remotes/origin/develop",
+                check=False,
+            )
+            self.assertEqual(0, tracked.returncode)
+            self.assertEqual(
+                run_git("-C", str(seed), "rev-parse", "develop").stdout.strip(),
+                run_git(
+                    "-C", str(clone), "rev-parse", "refs/remotes/origin/develop"
+                ).stdout.strip(),
+            )
 
     def test_release_skill_verifies_exact_release_sha_before_each_publication(self):
         publication = block_containing(read_release_skill(), 'git commit -m "release: v{version}"')
@@ -240,9 +388,11 @@ class VersionContractTests(unittest.TestCase):
                 'git commit -m "release: v{version}"',
                 'RELEASE_SHA="$(git rev-parse HEAD)"',
                 "git push origin develop",
-                "git fetch origin develop",
+                "git fetch origin '{}'".format(DEVELOP_REFSPEC),
                 'test "$(git rev-parse origin/develop)" = "$RELEASE_SHA"',
+                "git fetch origin '{}'".format(MAIN_REFSPEC),
                 "git checkout main",
+                "git merge --ff-only origin/main",
                 'git merge --no-ff "$RELEASE_SHA" -m "Merge develop: v{version}"',
                 'MAIN_SHA="$(git rev-parse HEAD)"',
                 'test "$MAIN_SHA" != "$RELEASE_SHA"',
@@ -253,7 +403,7 @@ class VersionContractTests(unittest.TestCase):
                 'test "$TAG_SHA" = "$MAIN_SHA"',
                 'git merge-base --is-ancestor "$RELEASE_SHA" "$TAG_SHA"',
                 "git push origin main",
-                "git fetch origin main",
+                "git fetch origin '{}'".format(MAIN_REFSPEC),
                 'test "$(git rev-parse origin/main)" = "$MAIN_SHA"',
                 "git push origin v{version}",
                 'REMOTE_TAG_SHA="$(git ls-remote --tags origin "refs/tags/v{version}^{}"',
@@ -280,10 +430,15 @@ class VersionContractTests(unittest.TestCase):
         self.assertIn(clean_command, release, "release must assert a clean develop tree")
 
         checkout_position = release.index("git checkout develop")
-        pull_position = release.index(
-            "git pull --ff-only origin develop", checkout_position
+        merge_position = release.find(
+            "git merge --ff-only origin/develop", checkout_position
         )
-        clean_position = release.index(clean_command, pull_position)
+        self.assertNotEqual(
+            -1,
+            merge_position,
+            "develop must be fast-forwarded from the fetched tracking ref",
+        )
+        clean_position = release.index(clean_command, merge_position)
         metadata_position = release.index(".claude-plugin/plugin.json", clean_position)
         gate_end = release.index(gate_end_marker, metadata_position) + len(
             gate_end_marker

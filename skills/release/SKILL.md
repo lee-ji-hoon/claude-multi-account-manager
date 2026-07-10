@@ -18,16 +18,21 @@ reading version sources or changing release metadata:
 
 ```bash
 bash -euo pipefail <<'SH'
-git checkout develop
-git fetch origin develop
-git pull --ff-only origin develop
+git fetch origin '+refs/heads/develop:refs/remotes/origin/develop'
+if git show-ref --verify --quiet refs/heads/develop; then
+    git checkout develop
+else
+    git checkout -b develop --track origin/develop
+fi
+git merge --ff-only origin/develop
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)" || { echo "ERROR: local develop differs from origin/develop" >&2; exit 1; }
 test -z "$(git status --porcelain)" || { echo "ERROR: develop worktree is not clean" >&2; exit 1; }
 SH
 ```
 
-Stop immediately if checkout, fetch, pull, remote equality, or the clean-tree
-assertion fails. Exact equality rejects a clean local-ahead develop branch.
+Stop immediately if fetch, checkout/create, fast-forward merge, remote equality,
+or the clean-tree assertion fails. Exact equality rejects a clean local-ahead
+develop branch.
 
 ### 2. Select a version above every published or installed version
 
@@ -116,12 +121,12 @@ git add .claude-plugin/plugin.json .claude-plugin/marketplace.json pyproject.tom
 git commit -m "release: v{version}"
 RELEASE_SHA="$(git rev-parse HEAD)"
 git push origin develop
-git fetch origin develop
+git fetch origin '+refs/heads/develop:refs/remotes/origin/develop'
 test "$(git rev-parse origin/develop)" = "$RELEASE_SHA" || { echo "ERROR: origin/develop does not equal the release commit" >&2; exit 1; }
 
+git fetch origin '+refs/heads/main:refs/remotes/origin/main'
 git checkout main
-git fetch origin main
-git pull --ff-only origin main
+git merge --ff-only origin/main
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" || { echo "ERROR: local main differs from origin/main" >&2; exit 1; }
 git merge --no-ff "$RELEASE_SHA" -m "Merge develop: v{version}"
 MAIN_SHA="$(git rev-parse HEAD)"
@@ -135,7 +140,7 @@ test "$TAG_SHA" = "$MAIN_SHA" || { echo "ERROR: release tag does not point to ma
 git merge-base --is-ancestor "$RELEASE_SHA" "$TAG_SHA"
 
 git push origin main
-git fetch origin main
+git fetch origin '+refs/heads/main:refs/remotes/origin/main'
 test "$(git rev-parse origin/main)" = "$MAIN_SHA" || { echo "ERROR: origin/main does not equal the verified main commit" >&2; exit 1; }
 git merge-base --is-ancestor "$RELEASE_SHA" "$(git rev-parse origin/main)"
 git push origin v{version}
@@ -155,8 +160,9 @@ Update the marketplace clone and request the plugin update:
 
 ```bash
 bash -euo pipefail <<'SH'
+git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" fetch origin '+refs/heads/main:refs/remotes/origin/main'
 git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" checkout main
-git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" pull --ff-only origin main
+git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" merge --ff-only origin/main
 SH
 ```
 
@@ -184,7 +190,7 @@ Claude Code must be restarted before using the released plugin.
 
 ## Checklist
 
-- [ ] Latest develop is fetched, pulled with `--ff-only`, exactly equal to `origin/develop`, and clean
+- [ ] Latest develop is fetched by explicit refspec, merged with `--ff-only`, exactly equal to `origin/develop`, and clean
 - [ ] Requested semver is greater than every remote and cached version
 - [ ] All three metadata files equal `{version}` and CHANGELOG is updated
 - [ ] Python, both shell suites, and shell syntax gates pass
