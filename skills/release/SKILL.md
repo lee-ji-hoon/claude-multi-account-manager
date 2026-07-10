@@ -11,7 +11,20 @@ the installed cache to drift.
 
 ## Required sequence
 
-### 1. Select a version above every published or installed version
+### 1. Prepare a clean, current develop tree
+
+Establish the exact tree that will be edited, tested, and committed before
+reading version sources or changing release metadata:
+
+```bash
+git checkout develop
+git pull --ff-only origin develop
+test -z "$(git status --porcelain)" || { echo "ERROR: develop worktree is not clean" >&2; exit 1; }
+```
+
+Stop immediately if checkout, pull, or the clean-tree assertion fails.
+
+### 2. Select a version above every published or installed version
 
 Fetch every remote tag from `origin`, then inspect the version directories in
 the local cache at `~/.claude/plugins/cache/lee-ji-hoon/account/`. Parse only
@@ -23,7 +36,7 @@ maximum and use AskUserQuestion; never infer the next release silently.
 After choosing the candidate, verify it with only the Python standard library:
 
 ```bash
-git fetch --tags origin
+git fetch --tags origin || { echo "ERROR: failed to fetch remote tags" >&2; exit 1; }
 python3 - "{version}" <<'PY'
 import re
 import subprocess
@@ -58,7 +71,7 @@ if highest is not None and requested_semver <= semver(highest):
 PY
 ```
 
-### 2. Update all release metadata and changelog
+### 3. Update all release metadata and changelog
 
 Set the exact same `{version}` in each release artifact:
 
@@ -70,7 +83,7 @@ Set the exact same `{version}` in each release artifact:
 Re-read all three metadata files and stop if any value differs from
 `{version}`.
 
-### 3. Run the full release gate
+### 4. Run the full release gate
 
 Run every command and stop on the first failure:
 
@@ -83,11 +96,12 @@ bash -n install.sh hooks-handlers/session-start.sh hooks-handlers/prompt-submit.
 
 Do not commit, push, merge, or tag until the full gate passes.
 
-### 4. Commit and push the release on develop
+### 5. Commit and push the tested release on develop
+
+Between the successful gate and release commit, do not pull, checkout, merge,
+reset, clean, stash, or edit any file. Only stage the four release files:
 
 ```bash
-git checkout develop
-git pull --ff-only origin develop
 git add .claude-plugin/plugin.json .claude-plugin/marketplace.json pyproject.toml CHANGELOG.md
 git commit -m "release: v{version}"
 git push origin develop
@@ -95,7 +109,7 @@ git push origin develop
 
 Verify that the pushed `develop` HEAD is the release commit before continuing.
 
-### 5. Merge develop into main, then tag main
+### 6. Merge develop into main, then tag main
 
 ```bash
 git checkout main
@@ -115,7 +129,7 @@ git push origin v{version}
 
 Stop if `git rev-list -n 1 v{version}` differs from `git rev-parse main`.
 
-### 6. Verify the marketplace checkout and exact cache version
+### 7. Verify the marketplace checkout and exact cache version
 
 Update the marketplace clone and request the plugin update:
 
@@ -146,10 +160,11 @@ Claude Code must be restarted before using the released plugin.
 
 ## Checklist
 
+- [ ] Latest develop is checked out, pulled with `--ff-only`, and clean
 - [ ] Requested semver is greater than every remote and cached version
 - [ ] All three metadata files equal `{version}` and CHANGELOG is updated
 - [ ] Python, both shell suites, and shell syntax gates pass
-- [ ] Release commit is pushed from develop
+- [ ] The gated tree is committed and pushed from develop without intervening mutation
 - [ ] develop is merged into main before tagging main HEAD
 - [ ] main and `v{version}` are pushed in that order
 - [ ] Marketplace checkout and exact `{version}` cache are verified

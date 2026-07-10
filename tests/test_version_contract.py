@@ -103,6 +103,9 @@ class VersionContractTests(unittest.TestCase):
     def test_release_skill_orders_version_gate_and_publication(self):
         release = (ROOT / "skills/release/SKILL.md").read_text(encoding="utf-8")
         required_in_order = [
+            "git checkout develop",
+            "git pull --ff-only origin develop",
+            'test -z "$(git status --porcelain)"',
             "remote tag",
             "local cache",
             ".claude-plugin/plugin.json",
@@ -113,7 +116,7 @@ class VersionContractTests(unittest.TestCase):
             "bash tests/test_hooks_shell.sh",
             "bash tests/test_install_shell.sh",
             "bash -n install.sh hooks-handlers/session-start.sh hooks-handlers/prompt-submit.sh",
-            "git checkout develop",
+            "git add .claude-plugin/plugin.json .claude-plugin/marketplace.json pyproject.toml CHANGELOG.md",
             "git commit",
             "git push origin develop",
             "git checkout main",
@@ -135,6 +138,61 @@ class VersionContractTests(unittest.TestCase):
                 "release skill is missing or misorders {!r}".format(marker),
             )
             position = next_position
+
+    def test_release_skill_commits_the_same_clean_develop_tree_that_passed_gates(self):
+        release = (ROOT / "skills/release/SKILL.md").read_text(encoding="utf-8")
+        gate_end_marker = (
+            "bash -n install.sh hooks-handlers/session-start.sh "
+            "hooks-handlers/prompt-submit.sh"
+        )
+        stage_command = (
+            "git add .claude-plugin/plugin.json .claude-plugin/marketplace.json "
+            "pyproject.toml CHANGELOG.md"
+        )
+        clean_command = (
+            'test -z "$(git status --porcelain)" || { echo '
+            '"ERROR: develop worktree is not clean" >&2; exit 1; }'
+        )
+
+        self.assertIn(clean_command, release, "release must assert a clean develop tree")
+
+        checkout_position = release.index("git checkout develop")
+        pull_position = release.index(
+            "git pull --ff-only origin develop", checkout_position
+        )
+        clean_position = release.index(clean_command, pull_position)
+        metadata_position = release.index(".claude-plugin/plugin.json", clean_position)
+        gate_end = release.index(gate_end_marker, metadata_position) + len(
+            gate_end_marker
+        )
+        commit_position = release.index('git commit -m "release: v{version}"', gate_end)
+
+        git_commands_after_gate = re.findall(
+            r"(?m)^git \S.*$", release[gate_end:commit_position]
+        )
+        self.assertEqual(
+            [stage_command],
+            git_commands_after_gate,
+            "only the four-file staging command may occur between gates and commit",
+        )
+
+    def test_release_skill_fails_closed_when_remote_tag_fetch_fails(self):
+        release = (ROOT / "skills/release/SKILL.md").read_text(encoding="utf-8")
+        fetch_commands = re.findall(
+            r"(?m)^git fetch --tags origin.*$",
+            release,
+        )
+        self.assertEqual(
+            [
+                'git fetch --tags origin || { echo "ERROR: failed to fetch remote tags" '
+                ">&2; exit 1; }"
+            ],
+            fetch_commands,
+        )
+        self.assertLess(
+            release.index(fetch_commands[0]),
+            release.index('python3 - "{version}"'),
+        )
 
 
 if __name__ == "__main__":
