@@ -209,6 +209,24 @@ run_installer() {
     INSTALL_STATUS=$?
 }
 
+run_installer_with_git_context() {
+    local home="$1" stdout_path="$2" stderr_path="$3" git_dir="$4" git_work_tree="$5" git_index_file="$6"
+    mkdir -p "$home/tmp"
+    env -i \
+        HOME="$home" \
+        XDG_CONFIG_HOME="$home/.config" \
+        PATH="$SAFE_PATH" \
+        SHELL=/bin/zsh \
+        TMPDIR="$home/tmp" \
+        PYTHONDONTWRITEBYTECODE=1 \
+        INSTALL_TEST_SECRET="$SENTINEL_SECRET" \
+        GIT_DIR="$git_dir" \
+        GIT_WORK_TREE="$git_work_tree" \
+        GIT_INDEX_FILE="$git_index_file" \
+        bash "$REPO_ROOT/install.sh" >"$stdout_path" 2>"$stderr_path"
+    INSTALL_STATUS=$?
+}
+
 assert_install_artifacts() {
     local home="$1"
     local plugin_dir="$home/.claude/plugins/cache/local/account/$PLUGIN_VERSION"
@@ -277,7 +295,40 @@ assert_equal "$MTIME2_AFTER" "$MTIME2_BEFORE" "tracked regular rc mtime 불변"
 assert_file_contains_once_file "$CASE2/stdout" "$EXPECTED_SOURCE_BLOCK" "tracked rc 안내도 canonical SOURCE_BLOCK을 정확히 한 번 출력"
 assert_file_exists "$HOME2/.config/claude-account-manager/shell.sh" "tracked rc 거부 전 fragment 생성 완료"
 
-echo "[4] unsafe rc에 exact block 존재: success + no-write"
+echo "[4] external Git context tracked rc: fail-closed exit 3 + no-write"
+CASEE="$TMP_ROOT/external-git-context"
+HOMEE="$CASEE/home"
+GIT_DIRE="$CASEE/account.git"
+GIT_INDEXE="$CASEE/alternate-index"
+mkdir -p "$HOMEE"
+"$GIT_BIN" init --bare -q "$GIT_DIRE"
+printf '%s\n' 'export SENTINEL_RC=external-git-context' >"$HOMEE/.zshrc"
+env -i HOME="$HOMEE" PATH="$SAFE_PATH" GIT_DIR="$GIT_DIRE" GIT_WORK_TREE="$HOMEE" \
+    "$GIT_BIN" add -- .zshrc
+env -i HOME="$HOMEE" PATH="$SAFE_PATH" GIT_DIR="$GIT_DIRE" GIT_WORK_TREE="$HOMEE" \
+    "$GIT_BIN" ls-files --error-unmatch -- .zshrc >/dev/null 2>&1
+assert_equal "$?" "0" "external Git context가 .zshrc를 tracked로 판정"
+env -i HOME="$HOMEE" PATH="$SAFE_PATH" GIT_DIR="$GIT_DIRE" GIT_WORK_TREE="$HOMEE" \
+    GIT_INDEX_FILE="$GIT_INDEXE" "$GIT_BIN" read-tree --empty
+env -i HOME="$HOMEE" PATH="$SAFE_PATH" GIT_DIR="$GIT_DIRE" GIT_WORK_TREE="$HOMEE" \
+    GIT_INDEX_FILE="$GIT_INDEXE" "$GIT_BIN" ls-files --error-unmatch -- .zshrc >/dev/null 2>&1
+assert_equal "$?" "1" "alternate Git index는 .zshrc를 untracked로 숨김"
+assert_path_absent "$HOMEE/.git" "fake HOME에는 .git marker가 없음"
+"$PYTHON_BIN" -c \
+    'import os,sys; t=946684800123456789; os.utime(sys.argv[1], ns=(t,t))' \
+    "$HOMEE/.zshrc"
+HASHE_BEFORE=$(file_hash "$HOMEE/.zshrc")
+MTIMEE_BEFORE=$(file_mtime_ns "$HOMEE/.zshrc")
+run_installer_with_git_context "$HOMEE" "$CASEE/stdout" "$CASEE/stderr" "$GIT_DIRE" "$HOMEE" "$GIT_INDEXE"
+HASHE_AFTER=$(file_hash "$HOMEE/.zshrc")
+MTIMEE_AFTER=$(file_mtime_ns "$HOMEE/.zshrc")
+assert_equal "$INSTALL_STATUS" "3" "external Git context tracked rc installer exit 3"
+assert_equal "$HASHE_AFTER" "$HASHE_BEFORE" "external Git context tracked rc hash 불변"
+assert_equal "$MTIMEE_AFTER" "$MTIMEE_BEFORE" "external Git context tracked rc mtime 불변"
+assert_file_contains_once_file "$CASEE/stdout" "$EXPECTED_SOURCE_BLOCK" "external Git context 안내도 canonical SOURCE_BLOCK을 정확히 한 번 출력"
+assert_install_artifacts "$HOMEE"
+
+echo "[5] unsafe rc에 exact block 존재: success + no-write"
 CASE3="$TMP_ROOT/already"
 HOME3="$CASE3/home"
 mkdir -p "$HOME3"
@@ -299,7 +350,7 @@ assert_equal "$INSTALL_STATUS" "0" "exact block이 있는 unsafe rc installer ex
 assert_equal "$HASH3_AFTER" "$HASH3_BEFORE" "already symlink target hash 불변"
 assert_equal "$MTIME3_AFTER" "$MTIME3_BEFORE" "already symlink target mtime 불변"
 
-echo "[5] regular rc: canonical block 1회 설치 + 재실행 byte/mtime 불변"
+echo "[6] regular rc: canonical block 1회 설치 + 재실행 byte/mtime 불변"
 CASE4="$TMP_ROOT/regular"
 HOME4="$CASE4/home"
 mkdir -p "$HOME4"
@@ -330,6 +381,7 @@ for output in \
     "$CASE1/stdout" "$CASE1/stderr" \
     "$CASED/stdout" "$CASED/stderr" \
     "$CASE2/stdout" "$CASE2/stderr" \
+    "$CASEE/stdout" "$CASEE/stderr" \
     "$CASE3/stdout" "$CASE3/stderr" \
     "$CASE4/stdout-first" "$CASE4/stderr-first" \
     "$CASE4/stdout-second" "$CASE4/stderr-second"; do
@@ -338,6 +390,7 @@ done
 assert_tree_excludes_secret "$HOME1" "symlink 설치 결과에 sentinel secret 미저장"
 assert_tree_excludes_secret "$HOMED" "dangling symlink 설치 결과에 sentinel secret 미저장"
 assert_tree_excludes_secret "$HOME2" "tracked 설치 결과에 sentinel secret 미저장"
+assert_tree_excludes_secret "$HOMEE" "external Git context 설치 결과에 sentinel secret 미저장"
 assert_tree_excludes_secret "$HOME3" "already 설치 결과에 sentinel secret 미저장"
 assert_tree_excludes_secret "$HOME4" "regular 설치 결과에 sentinel secret 미저장"
 

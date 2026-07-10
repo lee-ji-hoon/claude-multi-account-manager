@@ -199,11 +199,53 @@ class TestShellIntegration(unittest.TestCase):
                 ["git", "rev-parse"],
                 128,
                 stdout="",
+                stderr="fatal: not a git repository (or any of the parent directories): .git\n",
             )
             with mock.patch.object(shell_integration.subprocess, "run", return_value=failed_probe):
                 self.assertEqual(shell_integration.install_source_block(rc_path), "unsafe")
 
             self.assertEqual(rc_path.read_bytes(), original)
+
+    def test_install_source_block_refuses_ambiguous_nonrepository_probe_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc_path = Path(tmp) / ".zshrc"
+            original = b"export SENTINEL=ambiguous-nonrepository-probe\n"
+            rc_path.write_bytes(original)
+            failed_probe = subprocess.CompletedProcess(
+                ["git", "rev-parse"],
+                128,
+                stdout="",
+                stderr=(
+                    "fatal: not a git repository (or any of the parent directories): .git\n"
+                    "sentinel additional diagnostic\n"
+                ),
+            )
+
+            with mock.patch.object(shell_integration.subprocess, "run", return_value=failed_probe):
+                self.assertEqual(shell_integration.install_source_block(rc_path), "unsafe")
+
+            self.assertEqual(rc_path.read_bytes(), original)
+
+    def test_install_source_block_refuses_repository_affecting_git_environment(self):
+        for variable, value in (
+            ("GIT_INDEX_FILE", "/tmp/sentinel-index"),
+            ("GIT_LITERAL_PATHSPECS", "1"),
+            ("GIT_CONFIG_COUNT", "0"),
+        ):
+            with self.subTest(variable=variable), tempfile.TemporaryDirectory() as tmp:
+                rc_path = Path(tmp) / ".zshrc"
+                original = b"export SENTINEL=ambiguous-git-environment\n"
+                rc_path.write_bytes(original)
+
+                with mock.patch.dict(
+                    os.environ,
+                    {"HOME": tmp, "PATH": os.environ.get("PATH", ""), variable: value},
+                    clear=True,
+                ), mock.patch.object(shell_integration.subprocess, "run") as git_probe:
+                    self.assertEqual(shell_integration.install_source_block(rc_path), "unsafe")
+
+                git_probe.assert_not_called()
+                self.assertEqual(rc_path.read_bytes(), original)
 
     def test_install_source_block_allows_proven_untracked_worktree_file(self):
         with tempfile.TemporaryDirectory() as tmp:

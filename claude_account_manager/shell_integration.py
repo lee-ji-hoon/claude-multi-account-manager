@@ -111,33 +111,75 @@ def ensure_fragment(path: Optional[Path] = None) -> bool:
 
 def is_git_tracked(path: Path) -> bool:
     actual_path = Path(path).resolve()
-    git_metadata_found = False
+    ambiguous_git_variables = {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_GLOB_PATHSPECS",
+        "GIT_GRAFT_FILE",
+        "GIT_ICASE_PATHSPECS",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_LITERAL_PATHSPECS",
+        "GIT_NAMESPACE",
+        "GIT_NOGLOB_PATHSPECS",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+        "GIT_QUARANTINE_PATH",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+    }
+    if any(
+        variable in ambiguous_git_variables or variable.startswith("GIT_CONFIG_")
+        for variable in os.environ
+    ):
+        return True
+
+    repository_context_present = "GIT_DIR" in os.environ or "GIT_WORK_TREE" in os.environ
     for directory in (actual_path.parent,) + tuple(actual_path.parent.parents):
-        marker = directory / ".git"
         try:
-            marker.lstat()
+            (directory / ".git").lstat()
         except FileNotFoundError:
             continue
         except OSError:
-            return True
-        git_metadata_found = True
+            repository_context_present = True
+            break
+        repository_context_present = True
         break
 
-    if not git_metadata_found:
-        return False
+    git_env = {
+        variable: os.environ[variable]
+        for variable in ("HOME", "PATH", "TMPDIR", "GIT_DIR", "GIT_WORK_TREE")
+        if variable in os.environ
+    }
+    git_env.update({
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "LC_ALL": "C",
+    })
 
     try:
         worktree = subprocess.run(
             ["git", "-C", str(actual_path.parent), "rev-parse", "--show-toplevel"],
             check=False,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
+            env=git_env,
         )
     except OSError:
         return True
     if worktree.returncode != 0:
-        return True
+        error = (worktree.stderr or "").strip()
+        outside_worktree = (
+            worktree.returncode == 128
+            and error == "fatal: not a git repository (or any of the parent directories): .git"
+            and not repository_context_present
+        )
+        return not outside_worktree
 
     root_text = worktree.stdout.strip()
     if not root_text:
@@ -163,6 +205,7 @@ def is_git_tracked(path: Path) -> bool:
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=git_env,
         )
     except OSError:
         return True
