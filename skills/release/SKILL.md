@@ -123,8 +123,10 @@ git checkout main
 git fetch origin main
 git pull --ff-only origin main
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" || { echo "ERROR: local main differs from origin/main" >&2; exit 1; }
-git merge "$RELEASE_SHA"
+git merge --no-ff "$RELEASE_SHA" -m "Merge develop: v{version}"
 MAIN_SHA="$(git rev-parse HEAD)"
+test "$MAIN_SHA" != "$RELEASE_SHA"
+test "$(git rev-parse "$MAIN_SHA^2")" = "$RELEASE_SHA"
 git merge-base --is-ancestor "$RELEASE_SHA" "$MAIN_SHA"
 # Record main HEAD only after it contains the exact release SHA.
 git tag -a v{version} -m "v{version}" "$MAIN_SHA"

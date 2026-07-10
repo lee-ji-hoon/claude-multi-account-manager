@@ -156,7 +156,7 @@ class VersionContractTests(unittest.TestCase):
             "git fetch origin main",
             "git pull --ff-only origin main",
             'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"',
-            'git merge "$RELEASE_SHA"',
+            'git merge --no-ff "$RELEASE_SHA" -m "Merge develop: v{version}"',
             "main HEAD",
             "git tag -a",
             "git push origin main",
@@ -216,7 +216,7 @@ class VersionContractTests(unittest.TestCase):
                 "git fetch origin main",
                 "git pull --ff-only origin main",
                 'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"',
-                'git merge "$RELEASE_SHA"',
+                'git merge --no-ff "$RELEASE_SHA" -m "Merge develop: v{version}"',
             ],
         )
 
@@ -226,6 +226,11 @@ class VersionContractTests(unittest.TestCase):
             "git merge develop",
             publication,
             "main must merge the recorded release commit, not a moving branch name",
+        )
+        self.assertNotIn(
+            '\ngit merge "$RELEASE_SHA"\n',
+            publication,
+            "main must not fast-forward across the release boundary",
         )
 
         assert_markers_in_order(
@@ -238,8 +243,10 @@ class VersionContractTests(unittest.TestCase):
                 "git fetch origin develop",
                 'test "$(git rev-parse origin/develop)" = "$RELEASE_SHA"',
                 "git checkout main",
-                'git merge "$RELEASE_SHA"',
+                'git merge --no-ff "$RELEASE_SHA" -m "Merge develop: v{version}"',
                 'MAIN_SHA="$(git rev-parse HEAD)"',
+                'test "$MAIN_SHA" != "$RELEASE_SHA"',
+                'test "$(git rev-parse "$MAIN_SHA^2")" = "$RELEASE_SHA"',
                 'git merge-base --is-ancestor "$RELEASE_SHA" "$MAIN_SHA"',
                 'git tag -a v{version} -m "v{version}" "$MAIN_SHA"',
                 'TAG_SHA="$(git rev-list -n 1 v{version})"',
