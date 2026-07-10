@@ -27,6 +27,37 @@ def read_project_version():
     return versions[0]
 
 
+def read_release_skill():
+    return (ROOT / "skills/release/SKILL.md").read_text(encoding="utf-8")
+
+
+def release_bash_blocks(release):
+    return re.findall(r"```bash\n(.*?)\n```", release, flags=re.DOTALL)
+
+
+def block_containing(release, marker):
+    matches = [block for block in release_bash_blocks(release) if marker in block]
+    if len(matches) != 1:
+        raise AssertionError(
+            "expected exactly one release bash block containing {!r}, found {}".format(
+                marker, len(matches)
+            )
+        )
+    return matches[0]
+
+
+def assert_markers_in_order(test_case, text, markers):
+    position = -1
+    for marker in markers:
+        next_position = text.find(marker, position + 1)
+        test_case.assertNotEqual(
+            -1,
+            next_position,
+            "missing or misordered marker {!r}".format(marker),
+        )
+        position = next_position
+
+
 class VersionContractTests(unittest.TestCase):
     def test_ci_runs_supported_python_matrix_and_full_gate(self):
         workflow_path = ROOT / ".github/workflows/test.yml"
@@ -101,10 +132,12 @@ class VersionContractTests(unittest.TestCase):
         self.assertIn('["version"]', assignment)
 
     def test_release_skill_orders_version_gate_and_publication(self):
-        release = (ROOT / "skills/release/SKILL.md").read_text(encoding="utf-8")
+        release = read_release_skill()
         required_in_order = [
             "git checkout develop",
+            "git fetch origin develop",
             "git pull --ff-only origin develop",
+            'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"',
             'test -z "$(git status --porcelain)"',
             "remote tag",
             "local cache",
@@ -120,7 +153,10 @@ class VersionContractTests(unittest.TestCase):
             "git commit",
             "git push origin develop",
             "git checkout main",
-            "git merge develop",
+            "git fetch origin main",
+            "git pull --ff-only origin main",
+            'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"',
+            'git merge "$RELEASE_SHA"',
             "main HEAD",
             "git tag -a",
             "git push origin main",
@@ -139,8 +175,88 @@ class VersionContractTests(unittest.TestCase):
             )
             position = next_position
 
+    def test_release_skill_wraps_every_bash_gate_in_fail_fast_execution(self):
+        blocks = release_bash_blocks(read_release_skill())
+        self.assertGreaterEqual(len(blocks), 6, "release skill must expose every gate")
+
+        for index, block in enumerate(blocks, start=1):
+            lines = block.splitlines()
+            self.assertEqual(
+                "bash -euo pipefail <<'SH'",
+                lines[0],
+                "release bash block {} must enter fail-fast bash".format(index),
+            )
+            self.assertEqual(
+                "SH",
+                lines[-1],
+                "release bash block {} must close the fail-fast unit".format(index),
+            )
+
+    def test_release_skill_rejects_local_ahead_develop_and_main(self):
+        release = read_release_skill()
+        develop_block = block_containing(release, "git checkout develop")
+        main_block = block_containing(release, "git checkout main")
+
+        assert_markers_in_order(
+            self,
+            develop_block,
+            [
+                "git checkout develop",
+                "git fetch origin develop",
+                "git pull --ff-only origin develop",
+                'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"',
+                'test -z "$(git status --porcelain)"',
+            ],
+        )
+        assert_markers_in_order(
+            self,
+            main_block,
+            [
+                "git checkout main",
+                "git fetch origin main",
+                "git pull --ff-only origin main",
+                'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"',
+                'git merge "$RELEASE_SHA"',
+            ],
+        )
+
+    def test_release_skill_verifies_exact_release_sha_before_each_publication(self):
+        publication = block_containing(read_release_skill(), 'git commit -m "release: v{version}"')
+        self.assertNotIn(
+            "git merge develop",
+            publication,
+            "main must merge the recorded release commit, not a moving branch name",
+        )
+
+        assert_markers_in_order(
+            self,
+            publication,
+            [
+                'git commit -m "release: v{version}"',
+                'RELEASE_SHA="$(git rev-parse HEAD)"',
+                "git push origin develop",
+                "git fetch origin develop",
+                'test "$(git rev-parse origin/develop)" = "$RELEASE_SHA"',
+                "git checkout main",
+                'git merge "$RELEASE_SHA"',
+                'MAIN_SHA="$(git rev-parse HEAD)"',
+                'git merge-base --is-ancestor "$RELEASE_SHA" "$MAIN_SHA"',
+                'git tag -a v{version} -m "v{version}" "$MAIN_SHA"',
+                'TAG_SHA="$(git rev-list -n 1 v{version})"',
+                'test "$TAG_SHA" = "$MAIN_SHA"',
+                'git merge-base --is-ancestor "$RELEASE_SHA" "$TAG_SHA"',
+                "git push origin main",
+                "git fetch origin main",
+                'test "$(git rev-parse origin/main)" = "$MAIN_SHA"',
+                "git push origin v{version}",
+                'REMOTE_TAG_SHA="$(git ls-remote --tags origin "refs/tags/v{version}^{}"',
+                'test "$REMOTE_TAG_SHA" = "$MAIN_SHA"',
+                'git merge-base --is-ancestor "$RELEASE_SHA" "$REMOTE_TAG_SHA"',
+            ],
+        )
+
     def test_release_skill_commits_the_same_clean_develop_tree_that_passed_gates(self):
-        release = (ROOT / "skills/release/SKILL.md").read_text(encoding="utf-8")
+        release = read_release_skill()
         gate_end_marker = (
             "bash -n install.sh hooks-handlers/session-start.sh "
             "hooks-handlers/prompt-submit.sh"

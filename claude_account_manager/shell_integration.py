@@ -99,10 +99,22 @@ def ensure_fragment(path: Optional[Path] = None) -> bool:
     destination = fragment_path() if path is None else Path(path)
     desired = render_fragment().encode("utf-8")
     try:
-        if destination.read_bytes() == desired:
-            return False
+        metadata = destination.lstat()
     except FileNotFoundError:
-        pass
+        metadata = None
+
+    if (
+        metadata is not None
+        and stat.S_ISREG(metadata.st_mode)
+        and metadata.st_uid == os.getuid()
+        and stat.S_IMODE(metadata.st_mode) == 0o600
+    ):
+        try:
+            current = destination.read_bytes()
+        except FileNotFoundError:
+            current = None
+        if current == desired:
+            return False
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     _atomic_replace(destination, desired, 0o600)

@@ -138,6 +138,25 @@ PY
     fi
 }
 
+assert_output_excludes_command_hint() {
+    local path="$1" command="$2" message="$3"
+    if "$PYTHON_BIN" - "$path" "$command" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+ansi = re.compile(r"\x1b\[[0-9;]*m")
+output = ansi.sub("", Path(sys.argv[1]).read_text(encoding="utf-8"))
+command_hint = re.compile(r"^\s*" + re.escape(sys.argv[2]) + r"(?:\s|$)")
+raise SystemExit(0 if not any(command_hint.search(line) for line in output.splitlines()) else 1)
+PY
+    then
+        pass_test "$message"
+    else
+        fail_test "$message"
+    fi
+}
+
 assert_source_block_once() {
     local rc_path="$1" message="$2"
     if "$PYTHON_BIN" - "$rc_path" "$EXPECTED_SOURCE_BLOCK" <<'PY'
@@ -402,6 +421,9 @@ assert_equal "$INSTALL_STATUS" "0" "regular rc 두 번째 installer exit 0"
 assert_equal "$HASH4_AFTER" "$HASH4_BEFORE" "두 번째 실행에서 regular rc hash 불변"
 assert_equal "$MTIME4_AFTER" "$MTIME4_BEFORE" "두 번째 실행에서 regular rc mtime 불변"
 assert_source_block_once "$HOME4/.zshrc" "두 번째 실행 후에도 source block 하나"
+assert_output_excludes_command_hint \
+    "$CASE4/stdout-first" "cl" \
+    "installer가 존재하지 않는 cl을 실행 가능 명령으로 안내하지 않음"
 
 for output in \
     "$CASE1/stdout" "$CASE1/stderr" \

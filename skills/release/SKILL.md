@@ -17,12 +17,17 @@ Establish the exact tree that will be edited, tested, and committed before
 reading version sources or changing release metadata:
 
 ```bash
+bash -euo pipefail <<'SH'
 git checkout develop
+git fetch origin develop
 git pull --ff-only origin develop
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)" || { echo "ERROR: local develop differs from origin/develop" >&2; exit 1; }
 test -z "$(git status --porcelain)" || { echo "ERROR: develop worktree is not clean" >&2; exit 1; }
+SH
 ```
 
-Stop immediately if checkout, pull, or the clean-tree assertion fails.
+Stop immediately if checkout, fetch, pull, remote equality, or the clean-tree
+assertion fails. Exact equality rejects a clean local-ahead develop branch.
 
 ### 2. Select a version above every published or installed version
 
@@ -36,6 +41,7 @@ maximum and use AskUserQuestion; never infer the next release silently.
 After choosing the candidate, verify it with only the Python standard library:
 
 ```bash
+bash -euo pipefail <<'SH'
 git fetch --tags origin || { echo "ERROR: failed to fetch remote tags" >&2; exit 1; }
 python3 - "{version}" <<'PY'
 import re
@@ -69,6 +75,7 @@ highest = max(known, key=semver) if known else None
 if highest is not None and requested_semver <= semver(highest):
     raise SystemExit("requested version must exceed the published/cache maximum")
 PY
+SH
 ```
 
 ### 3. Update all release metadata and changelog
@@ -88,54 +95,67 @@ Re-read all three metadata files and stop if any value differs from
 Run every command and stop on the first failure:
 
 ```bash
+bash -euo pipefail <<'SH'
 python3 -m unittest discover -s tests -p 'test_*.py'
 bash tests/test_hooks_shell.sh
 bash tests/test_install_shell.sh
 bash -n install.sh hooks-handlers/session-start.sh hooks-handlers/prompt-submit.sh
+SH
 ```
 
 Do not commit, push, merge, or tag until the full gate passes.
 
-### 5. Commit and push the tested release on develop
+### 5. Publish the tested release through develop, main, and the tag
 
 Between the successful gate and release commit, do not pull, checkout, merge,
 reset, clean, stash, or edit any file. Only stage the four release files:
 
 ```bash
+bash -euo pipefail <<'SH'
 git add .claude-plugin/plugin.json .claude-plugin/marketplace.json pyproject.toml CHANGELOG.md
 git commit -m "release: v{version}"
+RELEASE_SHA="$(git rev-parse HEAD)"
 git push origin develop
-```
+git fetch origin develop
+test "$(git rev-parse origin/develop)" = "$RELEASE_SHA" || { echo "ERROR: origin/develop does not equal the release commit" >&2; exit 1; }
 
-Verify that the pushed `develop` HEAD is the release commit before continuing.
-
-### 6. Merge develop into main, then tag main
-
-```bash
 git checkout main
+git fetch origin main
 git pull --ff-only origin main
-git merge develop
-```
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" || { echo "ERROR: local main differs from origin/main" >&2; exit 1; }
+git merge "$RELEASE_SHA"
+MAIN_SHA="$(git rev-parse HEAD)"
+git merge-base --is-ancestor "$RELEASE_SHA" "$MAIN_SHA"
+# Record main HEAD only after it contains the exact release SHA.
+git tag -a v{version} -m "v{version}" "$MAIN_SHA"
+TAG_SHA="$(git rev-list -n 1 v{version})"
+test "$TAG_SHA" = "$MAIN_SHA" || { echo "ERROR: release tag does not point to main HEAD" >&2; exit 1; }
+git merge-base --is-ancestor "$RELEASE_SHA" "$TAG_SHA"
 
-Confirm the merge succeeded and that the checked-out commit is the intended
-main HEAD. Only then create the annotated tag on that exact commit and push the
-branch before the tag:
-
-```bash
-git tag -a v{version} -m "v{version}" "$(git rev-parse HEAD)"
 git push origin main
+git fetch origin main
+test "$(git rev-parse origin/main)" = "$MAIN_SHA" || { echo "ERROR: origin/main does not equal the verified main commit" >&2; exit 1; }
+git merge-base --is-ancestor "$RELEASE_SHA" "$(git rev-parse origin/main)"
 git push origin v{version}
+REMOTE_TAG_SHA="$(git ls-remote --tags origin "refs/tags/v{version}^{}" | awk 'NR == 1 {print $1}')"
+test "$REMOTE_TAG_SHA" = "$MAIN_SHA" || { echo "ERROR: remote tag does not point to the verified main commit" >&2; exit 1; }
+git merge-base --is-ancestor "$RELEASE_SHA" "$REMOTE_TAG_SHA"
+SH
 ```
 
-Stop if `git rev-list -n 1 v{version}` differs from `git rev-parse main`.
+This publication block is one indivisible fail-fast execution unit. Do not split
+it: `RELEASE_SHA` records the gated release commit, each remote ref is checked
+after its push, and any failure stops all later merge, push, or tag mutations.
 
-### 7. Verify the marketplace checkout and exact cache version
+### 6. Verify the marketplace checkout and exact cache version
 
 Update the marketplace clone and request the plugin update:
 
 ```bash
+bash -euo pipefail <<'SH'
 git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" checkout main
 git -C "$HOME/.claude/plugins/marketplaces/lee-ji-hoon" pull --ff-only origin main
+SH
 ```
 
 Run `/plugin update account@lee-ji-hoon`, then verify the exact directory
@@ -144,6 +164,7 @@ its `.claude-plugin/plugin.json` version and require an exact `{version}` match;
 do not accept a different directory merely because it is the newest cache.
 
 ```bash
+bash -euo pipefail <<'SH'
 test -d "$HOME/.claude/plugins/cache/lee-ji-hoon/account/{version}"
 python3 - "$HOME/.claude/plugins/cache/lee-ji-hoon/account/{version}/.claude-plugin/plugin.json" "{version}" <<'PY'
 import json
@@ -154,17 +175,19 @@ with open(sys.argv[1], encoding="utf-8") as manifest:
 if actual != sys.argv[2]:
     raise SystemExit("exact cache version verification failed")
 PY
+SH
 ```
 
 Claude Code must be restarted before using the released plugin.
 
 ## Checklist
 
-- [ ] Latest develop is checked out, pulled with `--ff-only`, and clean
+- [ ] Latest develop is fetched, pulled with `--ff-only`, exactly equal to `origin/develop`, and clean
 - [ ] Requested semver is greater than every remote and cached version
 - [ ] All three metadata files equal `{version}` and CHANGELOG is updated
 - [ ] Python, both shell suites, and shell syntax gates pass
-- [ ] The gated tree is committed and pushed from develop without intervening mutation
-- [ ] develop is merged into main before tagging main HEAD
-- [ ] main and `v{version}` are pushed in that order
+- [ ] The gated tree's `RELEASE_SHA` exactly equals the pushed `origin/develop`
+- [ ] Local main equals `origin/main` before merging the exact `RELEASE_SHA`
+- [ ] Verified main and tag commits contain the exact `RELEASE_SHA`
+- [ ] main and `v{version}` are SHA-verified and pushed in that order
 - [ ] Marketplace checkout and exact `{version}` cache are verified

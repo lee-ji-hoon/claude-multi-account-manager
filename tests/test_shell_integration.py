@@ -124,6 +124,59 @@ class TestShellIntegration(unittest.TestCase):
             self.assertIs(shell_integration.ensure_fragment(path), False)
             self.assertEqual(path.stat().st_mtime_ns, stable_mtime)
 
+    def test_ensure_fragment_repairs_identical_symlink_without_touching_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            target = directory / "user-owned-fragment"
+            desired = shell_integration.render_fragment().encode("utf-8")
+            target.write_bytes(desired)
+            target.chmod(0o640)
+            target_stat = target.stat()
+            path = directory / "shell.sh"
+            path.symlink_to(target)
+
+            self.assertIs(shell_integration.ensure_fragment(path), True)
+
+            metadata = path.lstat()
+            self.assertFalse(path.is_symlink())
+            self.assertTrue(stat.S_ISREG(metadata.st_mode))
+            self.assertEqual(path.read_bytes(), desired)
+            self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o600)
+            self.assertEqual(target.read_bytes(), desired)
+            self.assertEqual(target.stat().st_ino, target_stat.st_ino)
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+
+    def test_ensure_fragment_repairs_identical_content_with_unsafe_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "shell.sh"
+            desired = shell_integration.render_fragment().encode("utf-8")
+            path.write_bytes(desired)
+            path.chmod(0o666)
+
+            self.assertIs(shell_integration.ensure_fragment(path), True)
+
+            metadata = path.lstat()
+            self.assertTrue(stat.S_ISREG(metadata.st_mode))
+            self.assertEqual(path.read_bytes(), desired)
+            self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o600)
+
+    def test_ensure_fragment_replaces_fifo_without_reading_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "shell.sh"
+            os.mkfifo(str(path), 0o600)
+
+            with mock.patch.object(
+                Path,
+                "read_bytes",
+                side_effect=AssertionError("non-regular fragment must not be read"),
+            ):
+                self.assertIs(shell_integration.ensure_fragment(path), True)
+
+            metadata = path.lstat()
+            self.assertTrue(stat.S_ISREG(metadata.st_mode))
+            self.assertEqual(path.read_bytes(), shell_integration.render_fragment().encode("utf-8"))
+            self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o600)
+
     def test_replace_failure_preserves_previous_complete_fragment(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
