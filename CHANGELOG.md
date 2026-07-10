@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.6] - 2026-07-10
+
+### Fixed
+- **shell rc 소유권 분리** — SessionStart가 `~/.zshrc`/`~/.bashrc`를 읽거나 수정하지 않고 plugin-owned runtime fragment만 atomic/idempotent하게 보장한다. installer는 exact source block을 먼저 확인하고 symlink, Git tracked rc, 불확실한 Git 환경에서는 기존 파일을 보존한 채 fail-closed한다.
+- **릴리스 무결성 강화** — Python 3.8 호환성과 세 version metadata 정합성을 CI에 고정하고, single-branch marketplace clone에서도 explicit refspec, clean/equality gate, exact release SHA, no-ff main merge와 tag 순서를 검증한다.
+
+### Added
+- 실제 symlink/tracked rc/alternate Git index, fragment replace 실패, single-branch Git checkout partial failure를 재현하는 회귀 테스트.
+
 ## [2.5.5] - 2026-07-08
 
 ### Fixed

@@ -16,11 +16,12 @@ DIM='\033[2m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PLUGIN_VERSION="2.1.4"
+PLUGIN_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$SCRIPT_DIR/.claude-plugin/plugin.json")"
 PLUGIN_NAME="account"
 PLUGIN_DIR="$HOME/.claude/plugins/cache/local/$PLUGIN_NAME/$PLUGIN_VERSION"
 ACCOUNTS_DIR="$HOME/.claude/accounts"
 INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
+SHELL_INTEGRATION="$PLUGIN_DIR/claude_account_manager/shell_integration.py"
 
 echo ""
 echo -e "${BOLD}  Claude Code Multi-Account Manager${NC}"
@@ -28,7 +29,7 @@ echo -e "${DIM}  ─────────────────────
 echo ""
 
 # 1. 계정 디렉토리 생성
-echo -e "  ${CYAN}[1/4]${NC} 계정 디렉토리 생성..."
+echo -e "  ${CYAN}[1/5]${NC} 계정 디렉토리 생성..."
 mkdir -p "$ACCOUNTS_DIR"
 chmod 700 "$ACCOUNTS_DIR"
 
@@ -37,15 +38,16 @@ if [ ! -f "$ACCOUNTS_DIR/index.json" ]; then
 fi
 
 # 2. 플러그인 디렉토리 생성 및 복사
-echo -e "  ${CYAN}[2/4]${NC} 플러그인 파일 복사..."
+echo -e "  ${CYAN}[2/5]${NC} 플러그인 파일 복사..."
 mkdir -p "$PLUGIN_DIR"
 
 # 필요한 파일들 복사
 cp -r "$SCRIPT_DIR/.claude-plugin" "$PLUGIN_DIR/"
-cp -r "$SCRIPT_DIR/commands" "$PLUGIN_DIR/"
 cp -r "$SCRIPT_DIR/hooks" "$PLUGIN_DIR/"
 cp -r "$SCRIPT_DIR/hooks-handlers" "$PLUGIN_DIR/"
 cp -r "$SCRIPT_DIR/claude_account_manager" "$PLUGIN_DIR/"
+cp -r "$SCRIPT_DIR/skills" "$PLUGIN_DIR/"
+cp -r "$SCRIPT_DIR/bin" "$PLUGIN_DIR/"
 cp "$SCRIPT_DIR/account_manager.py" "$PLUGIN_DIR/"
 
 # __pycache__ 제외하고 정리
@@ -55,7 +57,7 @@ find "$PLUGIN_DIR/claude_account_manager" -type d -name "__pycache__" -exec rm -
 chmod +x "$PLUGIN_DIR/hooks-handlers/session-start.sh"
 
 # 3. installed_plugins.json에 등록
-echo -e "  ${CYAN}[3/4]${NC} 플러그인 등록..."
+echo -e "  ${CYAN}[3/5]${NC} 플러그인 등록..."
 
 # installed_plugins.json이 없으면 생성
 if [ ! -f "$INSTALLED_PLUGINS" ]; then
@@ -90,8 +92,10 @@ with open(path, 'w') as f:
     json.dump(data, f, indent=2)
 EOF
 
-# 4. 터미널 alias 설정 (마커 기반 블록 관리)
-echo -e "  ${CYAN}[4/5]${NC} 터미널 alias 설정..."
+# 4. runtime fragment 생성 및 shell source block 설치
+echo -e "  ${CYAN}[4/5]${NC} shell integration 설정..."
+
+python3 "$SHELL_INTEGRATION" ensure-fragment
 
 # 사용자 shell 확인
 SHELL_RC=""
@@ -101,41 +105,23 @@ elif [ -n "$BASH_VERSION" ] || [ "$SHELL" = "/bin/bash" ]; then
     SHELL_RC="$HOME/.bashrc"
 fi
 
-MARKER_BEGIN="# >>> account-manager >>>"
-MARKER_END="# <<< account-manager <<<"
-
-ALIAS_ADDED=false
-if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
-    # 기존 마커 블록 또는 레거시 블록 제거
-    # NOTE: sed range는 첫 매칭 1쌍만 삭제하므로, 다중 블록 누적 시 while 루프로 모두 제거
-    while grep -q "$MARKER_BEGIN" "$SHELL_RC" 2>/dev/null; do
-        sed -i '' "/$MARKER_BEGIN/,/$MARKER_END/d" "$SHELL_RC"
-    done
-    if grep -q "# Claude Account Manager" "$SHELL_RC" 2>/dev/null; then
-        sed -i '' '/# Claude Account Manager.*터미널에서 계정 관리/d' "$SHELL_RC"
+SOURCE_CONFIGURED=false
+if [ -n "$SHELL_RC" ] && { [ -f "$SHELL_RC" ] || [ -L "$SHELL_RC" ]; }; then
+    if python3 "$SHELL_INTEGRATION" install-rc "$SHELL_RC"; then
+        SOURCE_CONFIGURED=true
+        echo -e "    ${GREEN}✓${NC} $SHELL_RC source 설정 확인됨"
+    else
+        SHELL_STATUS=$?
+        if [ "$SHELL_STATUS" -eq 3 ]; then
+            echo -e "    ${YELLOW}!${NC} 사용자 소유 shell 설정 파일은 자동 수정하지 않습니다"
+            echo -e "    ${DIM}아래 block을 직접 추가하세요:${NC}"
+            python3 -c 'import runpy,sys; sys.stdout.write(runpy.run_path(sys.argv[1])["SOURCE_BLOCK"])' "$SHELL_INTEGRATION"
+        fi
+        exit "$SHELL_STATUS"
     fi
-    if grep -q "^alias account=" "$SHELL_RC" 2>/dev/null; then
-        sed -i '' '/^alias account=/d' "$SHELL_RC"
-        sed -i '' '/^alias account-switch=/d' "$SHELL_RC"
-        sed -i '' '/^alias account-list=/d' "$SHELL_RC"
-        sed -i '' '/^alias cl=/d' "$SHELL_RC"
-    fi
-
-    # 새 마커 블록 추가
-    {
-        echo ""
-        echo "$MARKER_BEGIN"
-        echo "alias account='python3 \"$PLUGIN_DIR/account_manager.py\"'"
-        echo "alias account-switch='python3 \"$PLUGIN_DIR/account_manager.py\" switch'"
-        echo "alias account-list='python3 \"$PLUGIN_DIR/account_manager.py\" list'"
-        echo "alias cl='python3 \"$PLUGIN_DIR/bin/claude-launch\"'"
-        echo "$MARKER_END"
-    } >> "$SHELL_RC"
-    ALIAS_ADDED=true
-    echo -e "    ${GREEN}✓${NC} $SHELL_RC에 alias 설정됨"
 else
     echo -e "    ${YELLOW}!${NC} shell 설정 파일을 찾을 수 없습니다"
-    echo -e "    ${DIM}수동으로 추가하세요: alias account='python3 \"$PLUGIN_DIR/account_manager.py\"'${NC}"
+    echo -e "    ${DIM}runtime fragment는 생성했으며 shell rc는 변경하지 않았습니다${NC}"
 fi
 
 # 5. 완료
@@ -145,7 +131,7 @@ echo ""
 echo -e "${DIM}  ─────────────────────────────────────${NC}"
 echo -e "  ${GREEN}✓ 설치 완료!${NC}"
 
-if [ "$ALIAS_ADDED" = true ]; then
+if [ "$SOURCE_CONFIGURED" = true ]; then
     echo ""
     echo -e "  ${YELLOW}⚠ 터미널을 재시작하거나 'source $SHELL_RC' 실행${NC}"
 fi
@@ -160,10 +146,6 @@ echo -e "  ${CYAN}/account:list${NC}         계정 목록 + 사용량"
 echo -e "  ${CYAN}/account:add 이름${NC}     현재 계정 저장"
 echo -e "  ${CYAN}/account:switch${NC}       계정 전환"
 echo -e "  ${CYAN}/account:check${NC}        토큰 상태 확인"
-echo ""
-echo -e "${DIM}  ─────────────────────────────────────${NC}"
-echo -e "  ${BOLD}🚀 빠른 시작:${NC}"
-echo -e "  ${CYAN}cl${NC}                   런처 (계정 선택 + 세션 관리)"
 echo ""
 echo -e "${DIM}  ─────────────────────────────────────${NC}"
 echo -e "  ${BOLD}🚨 토큰 소진 시 (Claude가 응답 안 할 때):${NC}"
