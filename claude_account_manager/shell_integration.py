@@ -50,7 +50,14 @@ _LEGACY_BLOCK = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 _LEGACY_ALIAS = re.compile(
-    rb"^[ \t]*alias[ \t]+(?:account|account-switch|account-list)=.*(?:\r?\n|$)",
+    rb"^[ \t]*alias[ \t]+(?:account|account-switch|account-list)=(?:"
+    rb"'_account_mgr_run(?: (?:switch|list))?'|"
+    rb'"_account_mgr_run(?: (?:switch|list))?"|'
+    rb"'python3 [^'\r\n]*/\.claude/plugins/cache/(?:local|lee-ji-hoon)/account/"
+    rb"[0-9]+\.[0-9]+\.[0-9]+/account_manager\.py[^'\r\n]*'|"
+    rb'"python3 [^"\r\n]*/\.claude/plugins/cache/(?:local|lee-ji-hoon)/account/'
+    rb'[0-9]+\.[0-9]+\.[0-9]+/account_manager\.py[^"\r\n]*"'
+    rb")[ \t]*(?:\r?\n|$)",
     re.MULTILINE,
 )
 
@@ -125,7 +132,16 @@ def is_git_tracked(path: Path) -> bool:
 
     try:
         tracked = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", str(relative_path)],
+            [
+                "git",
+                "--literal-pathspecs",
+                "-C",
+                str(root),
+                "ls-files",
+                "--error-unmatch",
+                "--",
+                str(relative_path),
+            ],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

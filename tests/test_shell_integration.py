@@ -55,7 +55,8 @@ def _write_manager(home, namespace, version, label):
     manager.parent.mkdir(parents=True)
     manager.write_text(
         "import os, sys\n"
-        "print(%r + '|' + os.environ.get('CLAUDE_CONFIG_DIR', '<unset>') + '|' + ','.join(sys.argv[1:]))\n"
+        "secret_state = 'secret-present' if 'SHELL_INTEGRATION_TEST_SECRET' in os.environ else 'secret-absent'\n"
+        "print(%r + '|' + os.environ.get('CLAUDE_CONFIG_DIR', '<unset>') + '|' + ','.join(sys.argv[1:]) + '|' + secret_state)\n"
         % label
     )
 
@@ -81,8 +82,16 @@ class TestShellIntegration(unittest.TestCase):
             _write_manager(home, "lee-ji-hoon", "2.9.9", "marketplace-2.9.9")
             fragment = home / "shell.sh"
             fragment.write_text(shell_integration.render_fragment())
-            env = os.environ.copy()
-            env.update({"HOME": str(home), "CLAUDE_CONFIG_DIR": "/tmp/sentinel-profile"})
+            with mock.patch.dict(
+                os.environ,
+                {"PATH": os.environ.get("PATH", ""), "SHELL_INTEGRATION_TEST_SECRET": "sentinel"},
+                clear=True,
+            ):
+                env = {
+                    "HOME": str(home),
+                    "PATH": os.environ["PATH"],
+                    "CLAUDE_CONFIG_DIR": "/tmp/sentinel-profile",
+                }
 
             first = subprocess.run(
                 ["bash", "-c", 'source "$1"\n_account_mgr_run probe', "bash", str(fragment)],
@@ -91,7 +100,7 @@ class TestShellIntegration(unittest.TestCase):
                 text=True,
                 env=env,
             )
-            self.assertEqual(first.stdout.strip(), "local-2.10.0|<unset>|probe")
+            self.assertEqual(first.stdout.strip(), "local-2.10.0|<unset>|probe|secret-absent")
 
             _write_manager(home, "lee-ji-hoon", "2.10.0", "marketplace-2.10.0")
             tied = subprocess.run(
@@ -101,7 +110,7 @@ class TestShellIntegration(unittest.TestCase):
                 text=True,
                 env=env,
             )
-            self.assertEqual(tied.stdout.strip(), "marketplace-2.10.0|<unset>|probe")
+            self.assertEqual(tied.stdout.strip(), "marketplace-2.10.0|<unset>|probe|secret-absent")
 
     def test_ensure_fragment_is_idempotent_and_preserves_mtime(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -152,6 +161,18 @@ class TestShellIntegration(unittest.TestCase):
             self.assertEqual(shell_integration.install_source_block(rc_path), "unsafe")
             self.assertEqual(rc_path.read_bytes(), b"export SENTINEL=tracked\n")
 
+    def test_install_source_block_refuses_git_tracked_pathspec_filename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            rc_path = repo / ":(glob).zshrc"
+            original = b"export SENTINEL=tracked-pathspec\n"
+            rc_path.write_bytes(original)
+            subprocess.run(["git", "-C", str(repo), "add", "--all"], check=True)
+
+            self.assertEqual(shell_integration.install_source_block(rc_path), "unsafe")
+            self.assertEqual(rc_path.read_bytes(), original)
+
     def test_unsafe_rc_with_exact_source_block_is_already_configured(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
@@ -180,6 +201,21 @@ class TestShellIntegration(unittest.TestCase):
             self.assertEqual(shell_integration.install_source_block(rc_path), "already")
             self.assertEqual(rc_path.read_bytes(), installed)
 
+    def test_unrelated_same_name_aliases_are_preserved_byte_for_byte(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rc_path = Path(tmp) / ".zshrc"
+            original = (
+                b"export KEEP_BEFORE=sentinel-before\n"
+                b"alias account='custom-account --profile personal'\n"
+                b"alias account-switch='python3 /tmp/custom/account_manager.py switch'\n"
+                b"alias account-list='custom-list-command'\n"
+                b"export KEEP_AFTER=sentinel-after\n"
+            )
+            rc_path.write_bytes(original)
+
+            self.assertEqual(shell_integration.install_source_block(rc_path), "installed")
+            self.assertEqual(rc_path.read_bytes(), original + shell_integration.SOURCE_BLOCK.encode())
+
     def test_regular_rc_legacy_marker_is_removed_without_touching_other_lines(self):
         with tempfile.TemporaryDirectory() as tmp:
             rc_path = Path(tmp) / ".zshrc"
@@ -189,9 +225,9 @@ class TestShellIntegration(unittest.TestCase):
                 b"# account-manager-block: v3\n"
                 b"alias account='_account_mgr_run'\n"
                 b"# <<< account-manager <<<\n"
-                b"alias account='python3 /tmp/legacy/account_manager.py'\n"
-                b"alias account-switch='python3 /tmp/legacy/account_manager.py switch'\n"
-                b"alias account-list='python3 /tmp/legacy/account_manager.py list'\n"
+                b"alias account='python3 /Users/sentinel/.claude/plugins/cache/local/account/2.1.4/account_manager.py'\n"
+                b"alias account-switch='python3 /Users/sentinel/.claude/plugins/cache/local/account/2.1.4/account_manager.py switch'\n"
+                b"alias account-list='python3 /Users/sentinel/.claude/plugins/cache/local/account/2.1.4/account_manager.py list'\n"
                 b"export KEEP_AFTER=sentinel-after\n"
             )
             rc_path.write_bytes(original)
@@ -201,7 +237,7 @@ class TestShellIntegration(unittest.TestCase):
             self.assertIn(b"export KEEP_BEFORE=sentinel-before\n", installed)
             self.assertIn(b"export KEEP_AFTER=sentinel-after\n", installed)
             self.assertNotIn(b"# >>> account-manager >>>", installed)
-            self.assertNotIn(b"/tmp/legacy/account_manager.py", installed)
+            self.assertNotIn(b"/Users/sentinel/.claude/plugins/cache/local/account", installed)
             self.assertEqual(installed.count(shell_integration.SOURCE_BEGIN.encode()), 1)
 
 
