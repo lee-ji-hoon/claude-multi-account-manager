@@ -247,6 +247,40 @@ class TestShellIntegration(unittest.TestCase):
                 git_probe.assert_not_called()
                 self.assertEqual(rc_path.read_bytes(), original)
 
+    def test_install_source_block_refuses_relative_git_dir_without_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            rc_path = repo / ".zshrc"
+            original = b"export SENTINEL=relative-git-dir\n"
+            rc_path.write_bytes(original)
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": tmp, "PATH": os.environ.get("PATH", ""), "GIT_DIR": ".git"},
+                clear=True,
+            ):
+                self.assertEqual(shell_integration.install_source_block(rc_path), "unsafe")
+
+            self.assertEqual(rc_path.read_bytes(), original)
+
+    def test_install_source_block_refuses_relative_git_work_tree_without_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            rc_path = repo / ".zshrc"
+            original = b"export SENTINEL=relative-git-work-tree\n"
+            rc_path.write_bytes(original)
+
+            with mock.patch.dict(
+                os.environ,
+                {"HOME": tmp, "PATH": os.environ.get("PATH", ""), "GIT_WORK_TREE": "."},
+                clear=True,
+            ):
+                self.assertEqual(shell_integration.install_source_block(rc_path), "unsafe")
+
+            self.assertEqual(rc_path.read_bytes(), original)
+
     def test_install_source_block_allows_proven_untracked_worktree_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

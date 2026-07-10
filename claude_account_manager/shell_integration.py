@@ -117,6 +117,7 @@ def is_git_tracked(path: Path) -> bool:
         "GIT_COMMON_DIR",
         "GIT_CONFIG",
         "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_DIR",
         "GIT_GLOB_PATHSPECS",
         "GIT_GRAFT_FILE",
         "GIT_ICASE_PATHSPECS",
@@ -131,6 +132,7 @@ def is_git_tracked(path: Path) -> bool:
         "GIT_QUARANTINE_PATH",
         "GIT_REPLACE_REF_BASE",
         "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
     }
     if any(
         variable in ambiguous_git_variables or variable.startswith("GIT_CONFIG_")
@@ -138,7 +140,7 @@ def is_git_tracked(path: Path) -> bool:
     ):
         return True
 
-    repository_context_present = "GIT_DIR" in os.environ or "GIT_WORK_TREE" in os.environ
+    repository_context_present = False
     for directory in (actual_path.parent,) + tuple(actual_path.parent.parents):
         try:
             (directory / ".git").lstat()
@@ -152,7 +154,7 @@ def is_git_tracked(path: Path) -> bool:
 
     git_env = {
         variable: os.environ[variable]
-        for variable in ("HOME", "PATH", "TMPDIR", "GIT_DIR", "GIT_WORK_TREE")
+        for variable in ("HOME", "PATH", "TMPDIR")
         if variable in os.environ
     }
     git_env.update({
