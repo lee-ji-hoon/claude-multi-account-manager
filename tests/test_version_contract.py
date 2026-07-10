@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEVELOP_REFSPEC = "+refs/heads/develop:refs/remotes/origin/develop"
 MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"
+DEVELOP_CREATE_COMMAND = "git checkout --no-track -b develop origin/develop"
 MARKETPLACE_PATH = '$HOME/.claude/plugins/marketplaces/lee-ji-hoon'
 MARKETPLACE_CLEAN_GUARD = (
     'test -z "$(git -C "'
@@ -63,11 +64,47 @@ def create_single_branch_marketplace_fixture(root):
     return origin, seed, home, clone
 
 
-def run_release_block(block, home):
+def create_trackless_develop_fixture(root):
+    origin = root / "origin.git"
+    seed = root / "seed"
+    clone = root / "clone"
+
+    run_git("init", "--bare", "-q", str(origin))
+    run_git("init", "-q", "-b", "main", str(seed))
+    run_git("-C", str(seed), "config", "user.name", "test")
+    run_git("-C", str(seed), "config", "user.email", "test@example.invalid")
+    (seed / "tree.txt").write_text("main\n", encoding="utf-8")
+    run_git("-C", str(seed), "add", "tree.txt")
+    run_git("-C", str(seed), "commit", "-q", "-m", "main")
+    main_sha = run_git("-C", str(seed), "rev-parse", "HEAD").stdout.strip()
+    run_git("-C", str(seed), "checkout", "-q", "-b", "develop")
+    (seed / "tree.txt").write_text("develop\n", encoding="utf-8")
+    run_git("-C", str(seed), "commit", "-q", "-am", "develop")
+    develop_sha = run_git("-C", str(seed), "rev-parse", "HEAD").stdout.strip()
+    run_git("-C", str(seed), "checkout", "-q", "main")
+    run_git("-C", str(seed), "remote", "add", "origin", str(origin))
+    run_git("-C", str(seed), "push", "-q", "origin", "main", "develop")
+    run_git(
+        "clone",
+        "-q",
+        "--single-branch",
+        "--branch",
+        "main",
+        str(origin),
+        str(clone),
+    )
+    return clone, main_sha, develop_sha
+
+
+def run_release_block(block, home=None, cwd=None):
+    env = dict(os.environ)
+    if home is not None:
+        env["HOME"] = str(home)
     return subprocess.run(
         ["bash"],
         check=False,
-        env=dict(os.environ, HOME=str(home)),
+        cwd=str(cwd) if cwd is not None else None,
+        env=env,
         input=block,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -204,7 +241,7 @@ class VersionContractTests(unittest.TestCase):
         required_in_order = [
             "git fetch origin '{}'".format(DEVELOP_REFSPEC),
             "git checkout develop",
-            "git checkout -b develop --track origin/develop",
+            DEVELOP_CREATE_COMMAND,
             "git merge --ff-only origin/develop",
             'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"',
             'test -z "$(git status --porcelain)"',
@@ -279,7 +316,7 @@ class VersionContractTests(unittest.TestCase):
             [
                 "git fetch origin '{}'".format(DEVELOP_REFSPEC),
                 "git checkout develop",
-                "git checkout -b develop --track origin/develop",
+                DEVELOP_CREATE_COMMAND,
                 "git merge --ff-only origin/develop",
                 'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"',
                 'test -z "$(git status --porcelain)"',
@@ -309,6 +346,9 @@ class VersionContractTests(unittest.TestCase):
         self.assertNotIn("git pull", develop_block)
         self.assertNotIn("git pull", publication)
         self.assertNotIn("git pull", marketplace)
+        self.assertNotIn("git checkout -b develop --track origin/develop", develop_block)
+        self.assertNotIn("git config branch.develop.", develop_block)
+        self.assertNotIn("git config --add remote.origin.fetch", develop_block)
         self.assertNotIn("\ngit fetch origin develop\n", release)
         self.assertNotIn("\ngit fetch origin main\n", release)
         assert_markers_in_order(
@@ -318,7 +358,7 @@ class VersionContractTests(unittest.TestCase):
                 "git fetch origin '{}'".format(DEVELOP_REFSPEC),
                 "if git show-ref --verify --quiet refs/heads/develop; then",
                 "git checkout develop",
-                "git checkout -b develop --track origin/develop",
+                DEVELOP_CREATE_COMMAND,
                 "git merge --ff-only origin/develop",
                 'test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)"',
                 'test -z "$(git status --porcelain)"',
@@ -402,28 +442,7 @@ class VersionContractTests(unittest.TestCase):
     def test_skill_develop_refspec_materializes_tracking_ref_in_single_branch_clone(self):
         release = read_release_skill()
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            origin = root / "origin.git"
-            seed = root / "seed"
-            clone = root / "clone"
-
-            run_git("init", "--bare", "-q", str(origin))
-            run_git("init", "-q", "-b", "main", str(seed))
-            run_git("-C", str(seed), "config", "user.name", "test")
-            run_git("-C", str(seed), "config", "user.email", "test@example.invalid")
-            run_git("-C", str(seed), "commit", "-q", "--allow-empty", "-m", "initial")
-            run_git("-C", str(seed), "branch", "develop")
-            run_git("-C", str(seed), "remote", "add", "origin", str(origin))
-            run_git("-C", str(seed), "push", "-q", "origin", "main", "develop")
-            run_git(
-                "clone",
-                "-q",
-                "--single-branch",
-                "--branch",
-                "main",
-                str(origin),
-                str(clone),
-            )
+            clone, _, develop_sha = create_trackless_develop_fixture(Path(tmp))
 
             fetch_config = run_git(
                 "-C", str(clone), "config", "--get-all", "remote.origin.fetch"
@@ -464,10 +483,119 @@ class VersionContractTests(unittest.TestCase):
             )
             self.assertEqual(0, tracked.returncode)
             self.assertEqual(
-                run_git("-C", str(seed), "rev-parse", "develop").stdout.strip(),
+                develop_sha,
                 run_git(
                     "-C", str(clone), "rev-parse", "refs/remotes/origin/develop"
                 ).stdout.strip(),
+            )
+
+    def test_track_option_partially_mutates_trackless_single_branch_clone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            clone, main_sha, develop_sha = create_trackless_develop_fixture(Path(tmp))
+            run_git("-C", str(clone), "fetch", "-q", "origin", DEVELOP_REFSPEC)
+
+            result = run_git(
+                "-C",
+                str(clone),
+                "checkout",
+                "-b",
+                "develop",
+                "--track",
+                "origin/develop",
+                check=False,
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("starting point 'origin/develop' is not a branch", result.stderr)
+            self.assertEqual(
+                "main",
+                run_git("-C", str(clone), "branch", "--show-current").stdout.strip(),
+            )
+            self.assertEqual(
+                main_sha,
+                run_git("-C", str(clone), "rev-parse", "HEAD").stdout.strip(),
+            )
+            self.assertEqual(
+                run_git(
+                    "-C", str(clone), "rev-parse", "{}^{{tree}}".format(develop_sha)
+                ).stdout.strip(),
+                run_git("-C", str(clone), "write-tree").stdout.strip(),
+                "failed --track checkout can leave the index at the develop tree",
+            )
+            self.assertEqual(
+                "develop\n",
+                (clone / "tree.txt").read_text(encoding="utf-8"),
+                "failed --track checkout can leave the worktree at the develop tree",
+            )
+            self.assertNotEqual(
+                "",
+                run_git("-C", str(clone), "status", "--porcelain").stdout.strip(),
+                "failed --track checkout can leave staged or worktree changes",
+            )
+
+    def test_release_skill_creates_trackless_develop_branch_without_partial_failure(self):
+        develop_block = block_containing(read_release_skill(), "git checkout develop")
+        with tempfile.TemporaryDirectory() as tmp:
+            clone, main_sha, develop_sha = create_trackless_develop_fixture(Path(tmp))
+
+            result = run_release_block(develop_block, cwd=clone)
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(
+                [MAIN_REFSPEC],
+                run_git(
+                    "-C", str(clone), "config", "--get-all", "remote.origin.fetch"
+                ).stdout.splitlines(),
+                "develop creation must not depend on widening remote fetch config",
+            )
+            self.assertEqual(
+                "develop",
+                run_git("-C", str(clone), "branch", "--show-current").stdout.strip(),
+            )
+            self.assertEqual(
+                develop_sha,
+                run_git("-C", str(clone), "rev-parse", "HEAD").stdout.strip(),
+            )
+            self.assertEqual(
+                develop_sha,
+                run_git("-C", str(clone), "rev-parse", "origin/develop").stdout.strip(),
+            )
+            self.assertEqual(
+                "",
+                run_git("-C", str(clone), "status", "--porcelain").stdout.strip(),
+            )
+            upstream = run_git(
+                "-C",
+                str(clone),
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}",
+                check=False,
+            )
+            self.assertNotEqual(
+                0,
+                upstream.returncode,
+                "trackless develop intentionally has no implicit upstream authority",
+            )
+            for key in ("branch.develop.remote", "branch.develop.merge"):
+                configured = run_git(
+                    "-C", str(clone), "config", "--get", key, check=False
+                )
+                self.assertNotEqual(
+                    0,
+                    configured.returncode,
+                    "release must not create implicit upstream config for {}".format(key),
+                )
+            self.assertEqual(
+                main_sha,
+                run_git("-C", str(clone), "rev-parse", "refs/heads/main").stdout.strip(),
+                "creating develop must not move the original main branch",
+            )
+            self.assertEqual(
+                "main\n",
+                run_git("-C", str(clone), "show", "refs/heads/main:tree.txt").stdout,
+                "creating develop must not rewrite the original main tree",
             )
 
     def test_release_skill_verifies_exact_release_sha_before_each_publication(self):

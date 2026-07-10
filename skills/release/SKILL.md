@@ -22,7 +22,7 @@ git fetch origin '+refs/heads/develop:refs/remotes/origin/develop'
 if git show-ref --verify --quiet refs/heads/develop; then
     git checkout develop
 else
-    git checkout -b develop --track origin/develop
+    git checkout --no-track -b develop origin/develop
 fi
 git merge --ff-only origin/develop
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)" || { echo "ERROR: local develop differs from origin/develop" >&2; exit 1; }
@@ -32,7 +32,9 @@ SH
 
 Stop immediately if fetch, checkout/create, fast-forward merge, remote equality,
 or the clean-tree assertion fails. Exact equality rejects a clean local-ahead
-develop branch.
+develop branch. A newly created develop branch intentionally has no implicit
+upstream; the explicit refspec, `origin/develop` merge, and equality check are
+the authority without widening `remote.origin.fetch`.
 
 ### 2. Select a version above every published or installed version
 
