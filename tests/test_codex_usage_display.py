@@ -80,11 +80,12 @@ class CodexUsageDisplayTest(unittest.TestCase):
         output, fetched_auth, live_auth = self._render_current_usage(usage)
 
         self.assertIn("5h", output)
-        self.assertIn("83% 남음", output)
+        self.assertIn("17%", output)
         self.assertIn("1h 0m", output)
         self.assertIn("주간", output)
-        self.assertIn("58% 남음", output)
+        self.assertIn("42%", output)
         self.assertIn("2d 0h", output)
+        self.assertNotIn("남음", output)
         self.assertRegex(output, r"토큰 🔑 \d+d \d+h 후 만료")
         self.assertNotIn("🔑 -", output)
         self.assertIs(fetched_auth[0], live_auth)
@@ -115,9 +116,9 @@ class CodexUsageDisplayTest(unittest.TestCase):
         output, _, _ = self._render_current_usage(usage)
 
         self.assertIn("주간", output)
-        self.assertIn("51% 남음", output)
+        self.assertIn("49%", output)
         self.assertIn("Mini 주간", output)
-        self.assertIn("80% 남음", output)
+        self.assertIn("20%", output)
         self.assertNotIn("\n      5h", output)
         self.assertNotIn("Mini 5h", output)
 
@@ -161,7 +162,7 @@ class CodexUsageDisplayTest(unittest.TestCase):
         self.assertNotIn("Spark", output)
         self.assertIn("Mini 5h", output)
 
-    def test_remaining_bar_color_matches_remaining_text_semantics(self):
+    def test_codex_bar_color_matches_claude_used_semantics(self):
         usage = {
             "rate_limit": {
                 "primary_window": {
@@ -179,8 +180,8 @@ class CodexUsageDisplayTest(unittest.TestCase):
 
         output, _, _ = self._render_current_usage(usage)
 
-        self.assertIn(Colors.GREEN + "█" * 12 + Colors.RESET, output)
-        self.assertIn(Colors.RED + "░" * 12 + Colors.RESET, output)
+        self.assertIn(Colors.GREEN + "░" * 12 + Colors.RESET, output)
+        self.assertIn(Colors.RED + "█" * 11 + "░" + Colors.RESET, output)
 
     def test_daily_window_uses_daily_label(self):
         usage = {
@@ -196,7 +197,7 @@ class CodexUsageDisplayTest(unittest.TestCase):
         output, _, _ = self._render_current_usage(usage)
 
         self.assertIn("일간", output)
-        self.assertIn("75% 남음", output)
+        self.assertIn("25%", output)
         self.assertNotIn("\n      5h", output)
         self.assertNotIn("주간", output)
 
