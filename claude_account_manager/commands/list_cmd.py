@@ -290,7 +290,7 @@ def cmd_list():
             remaining_pct = max(0.0, min(100.0, 100.0 - used_pct))
             reset = window.get("reset_after_seconds", 0)
             color = Colors.RED if remaining_pct <= 5 else Colors.YELLOW if remaining_pct <= 20 else Colors.GREEN
-            bar = make_progress_bar(remaining_pct, color=color)
+            bar = make_progress_bar(remaining_pct, width=12, color=color)
             reset_str = _fmt_seconds(reset)
             padded = _pad_label(label, max_w)
             print(f"      {c(Colors.DIM, padded)} {bar} {c(color, f'{remaining_pct:g}% 남음')} | ⏱ {reset_str}")
@@ -340,7 +340,9 @@ def cmd_list():
                         if window:
                             rows.append((_codex_window_label(window), window))
                     for extra in usage_data.get("additional_rate_limits", []):
-                        short_name = extra.get("limit_name", "")
+                        short_name = extra.get("limit_name", "") or ""
+                        if "Spark" in short_name:
+                            continue
                         short_name = short_name.replace("GPT-5.3-Codex-", "").replace("GPT-5-Codex-", "")
                         erl = extra.get("rate_limit", {})
                         for key in ("primary_window", "secondary_window"):

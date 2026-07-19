@@ -1,4 +1,5 @@
 import io
+import re
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
@@ -120,6 +121,46 @@ class CodexUsageDisplayTest(unittest.TestCase):
         self.assertNotIn("\n      5h", output)
         self.assertNotIn("Mini 5h", output)
 
+    def test_codex_bars_match_claude_width_and_spark_limits_are_hidden(self):
+        usage = {
+            "rate_limit": {
+                "primary_window": {
+                    "limit_window_seconds": 18000,
+                    "used_percent": 50,
+                    "reset_after_seconds": 3600,
+                }
+            },
+            "additional_rate_limits": [
+                {
+                    "limit_name": "GPT-5.3-Codex-Spark",
+                    "rate_limit": {
+                        "primary_window": {
+                            "limit_window_seconds": 18000,
+                            "used_percent": 10,
+                            "reset_after_seconds": 3600,
+                        }
+                    },
+                },
+                {
+                    "limit_name": "GPT-5.3-Codex-Mini",
+                    "rate_limit": {
+                        "primary_window": {
+                            "limit_window_seconds": 18000,
+                            "used_percent": 20,
+                            "reset_after_seconds": 3600,
+                        }
+                    },
+                },
+            ],
+        }
+
+        output, _, _ = self._render_current_usage(usage)
+        bars = re.findall(r"\x1b\[\d+m([█░]+)\x1b\[0m", output)
+
+        self.assertEqual([12, 12], [len(bar) for bar in bars])
+        self.assertNotIn("Spark", output)
+        self.assertIn("Mini 5h", output)
+
     def test_remaining_bar_color_matches_remaining_text_semantics(self):
         usage = {
             "rate_limit": {
@@ -138,8 +179,8 @@ class CodexUsageDisplayTest(unittest.TestCase):
 
         output, _, _ = self._render_current_usage(usage)
 
-        self.assertIn(Colors.GREEN + "█" * 20 + Colors.RESET, output)
-        self.assertIn(Colors.RED + "█" + "░" * 19 + Colors.RESET, output)
+        self.assertIn(Colors.GREEN + "█" * 12 + Colors.RESET, output)
+        self.assertIn(Colors.RED + "░" * 12 + Colors.RESET, output)
 
     def test_daily_window_uses_daily_label(self):
         usage = {
