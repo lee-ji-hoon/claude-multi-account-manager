@@ -260,19 +260,40 @@ def cmd_list():
     def _pad_label(s, width):
         return s + ' ' * max(0, width - _disp_len(s))
 
+    def _codex_window_label(window):
+        try:
+            seconds = int(window.get("limit_window_seconds"))
+        except (TypeError, ValueError):
+            return "제한"
+        windows = (
+            (18000, "5h"),
+            (86400, "일간"),
+            (604800, "주간"),
+            (2592000, "월간"),
+            (31536000, "연간"),
+        )
+        for expected, label in windows:
+            if abs(seconds - expected) <= expected * 0.05:
+                return label
+        return "제한"
+
     def _print_codex_usage_rows(rows):
         """rows: list of (label, window_dict). 레이블 너비 자동 정렬."""
         if not rows:
             return
         max_w = max(_disp_len(label) for label, _ in rows)
         for label, window in rows:
-            pct = window.get("used_percent", 0)
+            try:
+                used_pct = float(window.get("used_percent", 0))
+            except (TypeError, ValueError):
+                used_pct = 0.0
+            remaining_pct = max(0.0, min(100.0, 100.0 - used_pct))
             reset = window.get("reset_after_seconds", 0)
-            bar = make_progress_bar(pct)
-            color = Colors.RED if pct >= 95 else Colors.YELLOW if pct >= 80 else Colors.GREEN
+            color = Colors.RED if remaining_pct <= 5 else Colors.YELLOW if remaining_pct <= 20 else Colors.GREEN
+            bar = make_progress_bar(remaining_pct, color=color)
             reset_str = _fmt_seconds(reset)
             padded = _pad_label(label, max_w)
-            print(f"      {c(Colors.DIM, padded)} {bar} {c(color, f'{pct}%')} | ⏱ {reset_str}")
+            print(f"      {c(Colors.DIM, padded)} {bar} {c(color, f'{remaining_pct:g}% 남음')} | ⏱ {reset_str}")
 
     claude_count = len(index["accounts"])
 
@@ -289,7 +310,9 @@ def cmd_list():
 
                 # JWT에서 실시간 name/email/plan 추출 (저장된 값 fallback)
                 auth_file = CODEX_ACCOUNTS_DIR / f"auth_{acc['id']}.json"
-                auth_data = read_codex_auth(auth_file)
+                auth_data = read_codex_auth() if is_current else read_codex_auth(auth_file)
+                if not auth_data and is_current:
+                    auth_data = read_codex_auth(auth_file)
                 if auth_data:
                     info = get_codex_auth_info(auth_data)
                     display_name = info.get("name") or acc.get("name", acc["id"])
@@ -312,22 +335,19 @@ def cmd_list():
                 if usage_data:
                     rows = []
                     rl = usage_data.get("rate_limit", {})
-                    pw = rl.get("primary_window")
-                    sw = rl.get("secondary_window")
-                    if pw:
-                        rows.append(("5h", pw))
-                    if sw:
-                        rows.append(("주간", sw))
+                    for key in ("primary_window", "secondary_window"):
+                        window = rl.get(key)
+                        if window:
+                            rows.append((_codex_window_label(window), window))
                     for extra in usage_data.get("additional_rate_limits", []):
                         short_name = extra.get("limit_name", "")
                         short_name = short_name.replace("GPT-5.3-Codex-", "").replace("GPT-5-Codex-", "")
                         erl = extra.get("rate_limit", {})
-                        epw = erl.get("primary_window")
-                        esw = erl.get("secondary_window")
-                        if epw:
-                            rows.append((f"{short_name} 5h", epw))
-                        if esw:
-                            rows.append((f"{short_name} 주간", esw))
+                        for key in ("primary_window", "secondary_window"):
+                            window = erl.get(key)
+                            if window:
+                                label = f"{short_name} {_codex_window_label(window)}".strip()
+                                rows.append((label, window))
                     _print_codex_usage_rows(rows)
 
                 ts = get_codex_token_status(acc)

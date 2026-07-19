@@ -52,13 +52,16 @@ def format_tokens(n):
     return str(n)
 
 
-def make_progress_bar(percentage, width=20, filled_char="█", empty_char="░"):
+def make_progress_bar(percentage, width=20, filled_char="█", empty_char="░", color=None):
     """아스키 진행 막대 생성"""
     percentage = max(0, min(100, percentage))
     filled = int(width * percentage / 100)
     empty = width - filled
 
     bar = filled_char * filled + empty_char * empty
+
+    if color is not None:
+        return c(color, bar)
 
     # 색상 적용 (사용량에 따라)
     if percentage >= 90:
