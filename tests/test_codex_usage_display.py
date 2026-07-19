@@ -9,7 +9,7 @@ from claude_account_manager.ui import Colors
 
 
 class CodexUsageDisplayTest(unittest.TestCase):
-    def _render_current_usage(self, usage):
+    def _render_current_usage(self, usage, mark_colors=False):
         stored_auth = {
             "tokens": {"access_token": "stored-stale-token", "account_id": "account-1"},
             "last_refresh": "2020-01-01T00:00:00Z",
@@ -39,11 +39,18 @@ class CodexUsageDisplayTest(unittest.TestCase):
             fetched_auth.append(auth)
             return usage if auth is live_auth else None
 
+        def render_color(color, text):
+            if mark_colors:
+                color_name = {Colors.DIM: "DIM", Colors.CYAN: "CYAN"}.get(color)
+                if color_name:
+                    return f"<{color_name}>{text}</{color_name}>"
+            return text
+
         stdout = io.StringIO()
         with (
             patch.object(list_cmd, "load_index", return_value={"accounts": []}),
             patch.object(list_cmd, "get_current_account", return_value={}),
-            patch.object(list_cmd, "c", side_effect=lambda _color, text: text),
+            patch.object(list_cmd, "c", side_effect=render_color),
             patch("claude_account_manager.ui.USE_COLOR", True),
             patch("claude_account_manager.codex_provider.is_codex_available", return_value=True),
             patch("claude_account_manager.codex_provider.load_codex_index", return_value=codex_index),
@@ -60,6 +67,16 @@ class CodexUsageDisplayTest(unittest.TestCase):
             list_cmd.cmd_list()
 
         return stdout.getvalue(), fetched_auth, live_auth
+
+    def test_codex_email_is_dimmed_on_its_own_indented_line(self):
+        output, _, _ = self._render_current_usage({"rate_limit": {}}, mark_colors=True)
+
+        self.assertIn(
+            "  [1] ● work <CYAN>[Plus]</CYAN> - 활성\n"
+            "      <DIM>work@example.com</DIM>\n",
+            output,
+        )
+        self.assertNotIn("work <DIM>(work@example.com)</DIM>", output)
 
     def test_current_account_uses_live_auth_for_status_usage(self):
         usage = {
@@ -84,7 +101,8 @@ class CodexUsageDisplayTest(unittest.TestCase):
         self.assertIn("1h 0m", output)
         self.assertIn("주간", output)
         self.assertIn("42%", output)
-        self.assertIn("2d 0h", output)
+        self.assertIn("48h 0m", output)
+        self.assertNotIn("2d 0h", output)
         self.assertNotIn("남음", output)
         self.assertRegex(output, r"토큰 🔑 \d+d \d+h 후 만료")
         self.assertNotIn("🔑 -", output)
@@ -121,6 +139,41 @@ class CodexUsageDisplayTest(unittest.TestCase):
         self.assertIn("20%", output)
         self.assertNotIn("\n      5h", output)
         self.assertNotIn("Mini 5h", output)
+
+    def test_codex_reset_uses_total_hours_and_omits_nonpositive_suffixes(self):
+        usage = {
+            "rate_limit": {
+                "primary_window": {
+                    "limit_window_seconds": 604800,
+                    "used_percent": 49,
+                    "reset_after_seconds": 172800,
+                }
+            },
+            "additional_rate_limits": [
+                {
+                    "limit_name": "GPT-5.3-Codex-Mini",
+                    "rate_limit": {
+                        "primary_window": {
+                            "limit_window_seconds": 18000,
+                            "used_percent": 20,
+                            "reset_after_seconds": 0,
+                        },
+                        "secondary_window": {
+                            "limit_window_seconds": 604800,
+                            "used_percent": 20,
+                            "reset_after_seconds": -1,
+                        },
+                    },
+                }
+            ],
+        }
+
+        output, _, _ = self._render_current_usage(usage, mark_colors=True)
+
+        self.assertIn("<CYAN>⏱</CYAN> 48h 0m", output)
+        self.assertEqual(1, output.count("⏱"))
+        self.assertNotIn("2d 0h", output)
+        self.assertNotIn("곧", output)
 
     def test_codex_bars_match_claude_width_and_spark_limits_are_hidden(self):
         usage = {

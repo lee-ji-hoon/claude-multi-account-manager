@@ -240,19 +240,6 @@ def cmd_list():
         fetch_codex_usage,
     )
 
-    def _fmt_seconds(secs):
-        secs = int(secs)
-        if secs <= 0:
-            return "곧"
-        d = secs // 86400
-        h = (secs % 86400) // 3600
-        m = (secs % 3600) // 60
-        if d > 0:
-            return f"{d}d {h}h"
-        if h > 0:
-            return f"{h}h {m}m"
-        return f"{m}m"
-
     def _disp_len(s):
         import unicodedata
         return sum(2 if unicodedata.east_asian_width(ch) in ('W', 'F') else 1 for ch in s)
@@ -287,11 +274,18 @@ def cmd_list():
                 used_pct = float(window.get("used_percent", 0))
             except (TypeError, ValueError):
                 used_pct = 0.0
-            reset = window.get("reset_after_seconds", 0)
             bar = make_progress_bar(used_pct, width=12)
-            reset_str = _fmt_seconds(reset)
+            try:
+                reset_seconds = int(window.get("reset_after_seconds", 0))
+            except (TypeError, ValueError):
+                reset_seconds = 0
+            reset_suffix = ""
+            if reset_seconds > 0:
+                hours = reset_seconds // 3600
+                minutes = (reset_seconds % 3600) // 60
+                reset_suffix = f" | {c(Colors.CYAN, '⏱')} {hours}h {minutes}m"
             padded = _pad_label(label, max_w)
-            print(f"      {c(Colors.DIM, padded)} {bar} {used_pct:g}% | ⏱ {reset_str}")
+            print(f"      {c(Colors.DIM, padded)} {bar} {used_pct:g}%{reset_suffix}")
 
     claude_count = len(index["accounts"])
 
@@ -323,10 +317,11 @@ def cmd_list():
 
                 plan_colors = {"Pro": Colors.CYAN, "Plus": Colors.CYAN, "Free": Colors.DIM}
                 plan_badge = c(plan_colors.get(plan, Colors.DIM), f"[{plan}]")
-                email_str = f" {c(Colors.DIM, f'({display_email})')}" if display_email else ""
                 status_str = c(Colors.GREEN, "활성") if is_current else ""
                 status_text = f" - {status_str}" if status_str else ""
-                print(f"  [{j}] {marker} {display_name}{email_str} {plan_badge}{status_text}")
+                print(f"  [{j}] {marker} {display_name} {plan_badge}{status_text}")
+                if display_email:
+                    print(f"      {c(Colors.DIM, display_email)}")
 
                 # 사용량 조회 (auth_data 있는 경우) — 레이블 모아서 한번에 정렬 출력
                 usage_data = fetch_codex_usage(auth_data) if auth_data else None

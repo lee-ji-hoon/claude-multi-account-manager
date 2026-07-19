@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.10] - 2026-07-19
+
+### Changed
+- **Codex 계정 레이아웃을 Claude와 통일** — 이메일을 계정 헤더 아래의 별도 DIM 줄로 이동하고, reset suffix를 양수일 때만 CYAN 시계 아이콘과 총시간 `Hh Mm` 형식으로 표시한다.
+
 ## [2.5.9] - 2026-07-19
 
 ### Changed
