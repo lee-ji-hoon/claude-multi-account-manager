@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.9] - 2026-07-19
+
+### Changed
+- **Codex 사용량 의미를 Claude와 통일** — API의 `used_percent`를 그대로 12칸 막대와 `N%`로 표시하고 `남음` 문구를 제거한다. 사용량에 따른 색상 기준도 Claude 행과 동일하게 적용한다.
+
 ## [2.5.8] - 2026-07-19
 
 ### Changed
