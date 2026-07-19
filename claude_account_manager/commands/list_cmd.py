@@ -287,13 +287,11 @@ def cmd_list():
                 used_pct = float(window.get("used_percent", 0))
             except (TypeError, ValueError):
                 used_pct = 0.0
-            remaining_pct = max(0.0, min(100.0, 100.0 - used_pct))
             reset = window.get("reset_after_seconds", 0)
-            color = Colors.RED if remaining_pct <= 5 else Colors.YELLOW if remaining_pct <= 20 else Colors.GREEN
-            bar = make_progress_bar(remaining_pct, width=12, color=color)
+            bar = make_progress_bar(used_pct, width=12)
             reset_str = _fmt_seconds(reset)
             padded = _pad_label(label, max_w)
-            print(f"      {c(Colors.DIM, padded)} {bar} {c(color, f'{remaining_pct:g}% 남음')} | ⏱ {reset_str}")
+            print(f"      {c(Colors.DIM, padded)} {bar} {used_pct:g}% | ⏱ {reset_str}")
 
     claude_count = len(index["accounts"])
 
