@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.7] - 2026-07-19
+
+### Fixed
+- **`account`의 Codex 사용량·만료 표시 불일치 수정** — 현재 계정은 저장 당시 auth 사본 대신 Codex CLI가 갱신한 live `~/.codex/auth.json`을 사용한다. 이로써 사용량 행이 누락되고 정상 토큰이 `-Nd Nh 후 만료`로 표시되던 문제를 함께 해결한다.
+- **Codex `/status`와 한도 의미 통일** — API의 사용률을 남은 비율로 변환하고, 5시간·일간·주간·월간·연간 윈도우를 공식 허용 범위로 판별하며, 남은 비율과 진행 막대 색을 일치시킨다.
+
+### Added
+- live/stale auth 분리, 음수 만료 방지, 한도 윈도우·남은 비율·막대 색을 검증하는 오프라인 회귀 테스트.
+
 ## [2.5.6] - 2026-07-10
 
 ### Fixed
