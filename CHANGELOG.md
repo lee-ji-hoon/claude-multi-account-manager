@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.8] - 2026-07-19
+
+### Changed
+- **Codex 사용량 표시 간소화** — 사용량 막대를 Claude와 같은 12칸으로 맞추고, 별도 Spark 주간 한도 행은 숨긴다. 다른 추가 모델 한도는 기존대로 표시한다.
+
 ## [2.5.7] - 2026-07-19
 
 ### Fixed
