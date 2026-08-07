@@ -5,7 +5,7 @@
   "author": {
     "name": "ezhoon"
   },
-  "repository": "https://github.com/ezhoon/multi-login-claude",
+  "repository": "https://github.com/lee-ji-hoon/claude-multi-account-manager",
   "keywords": ["account", "multi-account", "oauth", "usage", "switch"],
   "skills": "./skills/"
 }
