@@ -145,7 +145,6 @@ struct ProviderState: Identifiable {
 final class PrototypeStore: ObservableObject {
     @Published var providers: [ProviderState] = PrototypeStore.samples
     @Published var selectedProvider: ProviderID = .claude
-    @Published var query = ""
     @Published var lastEvent = "상태를 읽었습니다 · 방금"
     @Published var dataMode = "DEMO"
     @Published var switchingAccountID: String?
@@ -361,18 +360,6 @@ final class PrototypeStore: ObservableObject {
         }
     }
 
-    var filteredAccounts: [(ProviderID, Account)] {
-        let all = providers.flatMap { provider in
-            provider.accounts.map { (provider.id, $0) }
-        }
-        guard !query.isEmpty else { return all }
-        return all.filter { provider, account in
-            [provider.rawValue, account.name, account.email, account.plan]
-                .joined(separator: " ")
-                .localizedCaseInsensitiveContains(query)
-        }
-    }
-
     private static let samples: [ProviderState] = [
         ProviderState(
             id: .claude,
@@ -508,22 +495,6 @@ private struct LiveBenefit: Decodable {
     let isExpiringSoon: Bool
 }
 
-enum PrototypeVariant: String, CaseIterable, Identifiable {
-    case overview = "A"
-    case focus = "B"
-    case quickSwitch = "C"
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .overview: "전체 현황"
-        case .focus: "공급자 집중"
-        case .quickSwitch: "빠른 전환"
-        }
-    }
-}
-
 @main
 struct SwitchboardPrototypeApp: App {
     @NSApplicationDelegateAdaptor(PrototypeAppDelegate.self) private var appDelegate
@@ -558,27 +529,13 @@ final class PrototypeAppDelegate: NSObject, NSApplicationDelegate {
 
 struct RootView: View {
     @ObservedObject var store: PrototypeStore
-    @AppStorage("prototypeVariantV2") private var variantRaw = PrototypeVariant.focus.rawValue
-
-    private var variant: PrototypeVariant {
-        PrototypeVariant(rawValue: variantRaw) ?? .overview
-    }
 
     var body: some View {
         VStack(spacing: 0) {
             HeaderView(store: store)
 
-            Group {
-                switch variant {
-                case .overview:
-                    OverviewVariant(store: store)
-                case .focus:
-                    FocusVariant(store: store)
-                case .quickSwitch:
-                    QuickSwitchVariant(store: store)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            FocusVariant(store: store)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
             HStack(spacing: 10) {
@@ -598,9 +555,8 @@ struct RootView: View {
             .padding(.horizontal, 14)
             .frame(height: 34)
 
-            VariantSwitcher(selection: $variantRaw)
         }
-        .frame(width: variant == .focus ? 440 : 390, height: variant == .overview ? 610 : 610)
+        .frame(width: 440, height: 610)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 }
@@ -733,12 +689,33 @@ struct ProviderCard: View {
 
 struct FocusVariant: View {
     @ObservedObject var store: PrototypeStore
+    @State private var showsOverview = false
 
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 4) {
+                Button {
+                    showsOverview = true
+                } label: {
+                    VStack(spacing: 5) {
+                        Image(systemName: "square.grid.2x2.fill")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 25, height: 25)
+                            .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
+                        Text("전체").font(.caption2)
+                    }
+                    .frame(width: 66, height: 58)
+                    .background(
+                        showsOverview ? Color.secondary.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 10)
+                    )
+                }
+                .buttonStyle(.plain)
+
                 ForEach(ProviderID.allCases) { id in
                     Button {
+                        showsOverview = false
                         store.selectedProvider = id
                     } label: {
                         VStack(spacing: 5) {
@@ -747,7 +724,7 @@ struct FocusVariant: View {
                         }
                         .frame(width: 66, height: 58)
                         .background(
-                            id == store.selectedProvider ? id.tint.opacity(0.14) : Color.clear,
+                            !showsOverview && id == store.selectedProvider ? id.tint.opacity(0.14) : Color.clear,
                             in: RoundedRectangle(cornerRadius: 10)
                         )
                     }
@@ -760,12 +737,22 @@ struct FocusVariant: View {
 
             Divider()
 
-            ProviderDetail(
-                provider: store.provider(store.selectedProvider),
-                onSwitch: { store.switchAccount(provider: store.selectedProvider, accountID: $0) },
-                onLaunchGrok: { store.launchGrok(grokHome: $0) }
-            )
-            .padding(14)
+            if showsOverview {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("전체 현황")
+                        .font(.title3.bold())
+                        .padding(.horizontal, 14)
+                        .padding(.top, 14)
+                    OverviewVariant(store: store)
+                }
+            } else {
+                ProviderDetail(
+                    provider: store.provider(store.selectedProvider),
+                    onSwitch: { store.switchAccount(provider: store.selectedProvider, accountID: $0) },
+                    onLaunchGrok: { store.launchGrok(grokHome: $0) }
+                )
+                .padding(14)
+            }
         }
     }
 }
@@ -863,44 +850,6 @@ struct ProviderDetail: View {
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
             .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
-        }
-    }
-}
-
-struct QuickSwitchVariant: View {
-    @ObservedObject var store: PrototypeStore
-
-    var body: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("공급자, 계정, 이메일 검색", text: $store.query)
-                    .textFieldStyle(.plain)
-            }
-            .padding(10)
-            .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
-            .padding(.horizontal, 12)
-
-            ScrollView {
-                LazyVStack(spacing: 5) {
-                    ForEach(store.filteredAccounts, id: \.1.id) { provider, account in
-                        let providerState = store.provider(provider)
-                        AccountRow(
-                            provider: provider,
-                            account: account,
-                            isActive: providerState.activeAccountID == account.id,
-                            action: { store.switchAccount(provider: provider, accountID: account.id) }
-                        )
-                    }
-                }
-                .padding(.horizontal, 12)
-            }
-
-            Text("Claude/Codex만 전환 후 공식 readback으로 확인합니다")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.bottom, 4)
         }
     }
 }
@@ -1127,36 +1076,5 @@ struct UsageLine: View {
             ProgressView(value: Double(window.usedPercent), total: 100)
                 .tint(window.usedPercent >= 85 ? .red : tint)
         }
-    }
-}
-
-struct VariantSwitcher: View {
-    @Binding var selection: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text("UI 비교")
-                .font(.caption2.bold())
-                .foregroundStyle(.secondary)
-            ForEach(PrototypeVariant.allCases) { variant in
-                Button {
-                    selection = variant.rawValue
-                } label: {
-                    Text("\(variant.rawValue) · \(variant.title)")
-                        .font(.caption2.weight(selection == variant.rawValue ? .semibold : .regular))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(
-                            selection == variant.rawValue ? Color.accentColor : Color.clear,
-                            in: Capsule()
-                        )
-                        .foregroundStyle(selection == variant.rawValue ? Color.white : Color.primary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity)
-        .background(.ultraThinMaterial)
     }
 }
