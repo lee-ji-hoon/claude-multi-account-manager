@@ -143,10 +143,10 @@ struct ProviderState: Identifiable {
 
 @MainActor
 final class PrototypeStore: ObservableObject {
-    @Published var providers: [ProviderState] = PrototypeStore.samples
+    @Published var providers: [ProviderState]
     @Published var selectedProvider: ProviderID = .claude
-    @Published var lastEvent = "상태를 읽었습니다 · 방금"
-    @Published var dataMode = "DEMO"
+    @Published var lastEvent: String
+    @Published var dataMode: String
     @Published var switchingAccountID: String?
     private let demoOnly: Bool
 
@@ -154,18 +154,28 @@ final class PrototypeStore: ObservableObject {
         demoOnly = CommandLine.arguments.contains("--demo-only") ||
             ProcessInfo.processInfo.environment["SWITCHBOARD_DEMO_ONLY"] == "1"
         if demoOnly {
+            providers = Self.samples
+            dataMode = "DEMO"
             lastEvent = "DEMO 전용 · 실계정은 읽지 않았습니다"
         } else {
+            providers = Self.unavailableProviders(note: "LIVE 상태를 읽는 중")
+            dataMode = "LIVE"
+            lastEvent = "LIVE 상태를 읽는 중…"
             refreshLiveData()
         }
     }
 
     func refreshLiveData() {
+        guard !demoOnly else { return }
         guard let script = Bundle.main.url(forResource: "live_snapshot", withExtension: "py") else {
-            lastEvent = "DEMO · live snapshot 도우미 없음"
+            providers = Self.unavailableProviders(note: "LIVE snapshot 도우미를 찾을 수 없음")
+            dataMode = "LIVE"
+            lastEvent = "LIVE 조회 실패 · snapshot 도우미 없음"
             return
         }
 
+        providers = Self.unavailableProviders(note: "LIVE 상태를 읽는 중")
+        dataMode = "LIVE"
         lastEvent = "실데이터 읽는 중…"
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Self.runPython(script: script.path, arguments: [])
@@ -174,7 +184,9 @@ final class PrototypeStore: ObservableObject {
                 guard case let .success(data) = result,
                       let snapshot = try? JSONDecoder().decode(LiveSnapshot.self, from: data)
                 else {
-                    self.lastEvent = "DEMO · 실데이터 조회 실패"
+                    self.providers = Self.unavailableProviders(note: "LIVE snapshot 조회 실패")
+                    self.dataMode = "LIVE"
+                    self.lastEvent = "LIVE 조회 실패 · 다시 시도하세요"
                     return
                 }
                 self.apply(snapshot: snapshot)
@@ -185,11 +197,8 @@ final class PrototypeStore: ObservableObject {
     private func apply(snapshot: LiveSnapshot) {
         providers = merge(snapshot: snapshot)
         let liveCount = providers.flatMap(\.accounts).filter { $0.origin == .live }.count
-        let demoCount = providers.flatMap(\.accounts).filter { $0.origin == .demo }.count
-        dataMode = demoCount == 0 ? "LIVE" : "LIVE + DEMO"
-        lastEvent = demoCount == 0
-            ? "✓ 실계정 \(liveCount)개 로드"
-            : "✓ 실계정 \(liveCount)개 · DEMO \(demoCount)개 로드"
+        dataMode = "LIVE"
+        lastEvent = "✓ 실계정 \(liveCount)개 로드"
     }
 
     nonisolated private static func runPython(script: String, arguments: [String]) -> Result<Data, Error> {
@@ -220,31 +229,32 @@ final class PrototypeStore: ObservableObject {
     private func merge(snapshot: LiveSnapshot) -> [ProviderState] {
         ProviderID.allCases.map { id in
             guard let liveProvider = snapshot.providers.first(where: { $0.id == id.rawValue.lowercased() }) else {
-                return provider(id)
-            }
-            var accounts = liveProvider.accounts.map { $0.account }
-            if !accounts.contains(where: { !$0.usage.isEmpty }),
-               let sample = Self.samples.first(where: { $0.id == id })?.accounts.first(where: { !$0.usage.isEmpty }) {
-                accounts.append(Account(
-                    id: "\(id.rawValue.lowercased())-demo",
-                    name: "\(sample.name) 예시",
-                    email: "mock@switchboard.demo",
-                    plan: sample.plan,
-                    health: sample.health,
-                    switchable: sample.switchable,
-                    usage: sample.usage,
-                    benefits: sample.benefits,
-                    origin: .demo
-                ))
+                return Self.unavailableProvider(id: id, note: "LIVE 공급자 응답 없음")
             }
             return ProviderState(
                 id: id,
                 activeAccountID: liveProvider.activeAccountID,
-                accounts: accounts,
+                accounts: liveProvider.accounts
+                    .filter(\.isLiveOrigin)
+                    .map { $0.account },
                 checkedAt: liveProvider.checkedAt.hasPrefix("CACHE") ? liveProvider.checkedAt : "LIVE · \(liveProvider.checkedAt)",
                 note: liveProvider.note,
             )
         }
+    }
+
+    private static func unavailableProviders(note: String) -> [ProviderState] {
+        ProviderID.allCases.map { unavailableProvider(id: $0, note: note) }
+    }
+
+    private static func unavailableProvider(id: ProviderID, note: String) -> ProviderState {
+        ProviderState(
+            id: id,
+            activeAccountID: "",
+            accounts: [],
+            checkedAt: "LIVE 조회 불가",
+            note: note
+        )
     }
 
     func provider(_ id: ProviderID) -> ProviderState {
@@ -467,6 +477,10 @@ private struct LiveAccount: Decodable {
     let benefits: [LiveBenefit]
     let origin: String
     let grokHome: String?
+
+    var isLiveOrigin: Bool {
+        origin == "live"
+    }
 
     var account: Account {
         Account(
