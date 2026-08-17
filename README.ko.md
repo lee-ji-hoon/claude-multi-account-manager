@@ -13,6 +13,10 @@ Claude/Codex usage API, Grok 로컬 `/usage`, Antigravity의 읽기 전용
 사용량·초기화 시각·Codex 리셋 크레딧·AGY 크레딧을 표시하고 남은 한도에
 따라 계정을 추천합니다.
 
+앱은 공급자 집중 화면을 기본으로 사용합니다. 왼쪽의 `전체`에서 네 공급자를
+한 번에 비교하거나 Claude·Codex·Grok·Gemini를 선택해 계정별 상세 상태와
+전환 동작을 확인할 수 있습니다.
+
 | 공급자 | 상태 읽기 | 앱 동작 |
 |---|---|---|
 | Claude | 5시간/주간 사용량, 초기화, 토큰 상태 | 저장 계정 전환 후 프로필·Keychain·계정 ID readback 확인 |
@@ -40,6 +44,9 @@ open "$HOME/Applications/Switchboard.app"
 Xcode Command Line Tools의 `python3`). 로컬 빌드는 Xcode Command Line Tools와
 macOS 14 이상이 필요합니다. GitHub 릴리스 앱은 ad-hoc 서명이라 macOS가 차단하면 Finder에서 앱을 Control-클릭한
 뒤 **열기**를 선택하거나 위 로컬 빌드 설치를 사용하세요.
+
+릴리스 전 로컬 게이트와 GitHub Actions는 지원 최소 버전인 Python 3.8에서
+전체 Python 테스트를 실행한 뒤 앱 번들과 서명을 검증합니다.
 
 Grok 계정을 여러 개 쓰려면 인증 파일을 복사하지 말고 프로필마다 한 번씩
 공식 로그인을 진행합니다.
