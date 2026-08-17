@@ -187,7 +187,9 @@ final class PrototypeStore: ObservableObject {
         let liveCount = providers.flatMap(\.accounts).filter { $0.origin == .live }.count
         let demoCount = providers.flatMap(\.accounts).filter { $0.origin == .demo }.count
         dataMode = demoCount == 0 ? "LIVE" : "LIVE + DEMO"
-        lastEvent = "✓ 실계정 \(liveCount)개 · DEMO \(demoCount)개 로드"
+        lastEvent = demoCount == 0
+            ? "✓ 실계정 \(liveCount)개 로드"
+            : "✓ 실계정 \(liveCount)개 · DEMO \(demoCount)개 로드"
     }
 
     nonisolated private static func runPython(script: String, arguments: [String]) -> Result<Data, Error> {
@@ -623,14 +625,19 @@ struct BrandIcon: View {
 
 struct OverviewVariant: View {
     @ObservedObject var store: PrototypeStore
+    let onOpen: (ProviderID) -> Void
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 ForEach(store.providers) { provider in
-                    ProviderCard(provider: provider) { accountID in
-                        store.switchAccount(provider: provider.id, accountID: accountID)
-                    }
+                    ProviderCard(
+                        provider: provider,
+                        onOpen: { onOpen(provider.id) },
+                        onSwitch: { accountID in
+                            store.switchAccount(provider: provider.id, accountID: accountID)
+                        }
+                    )
                 }
             }
             .padding(.horizontal, 12)
@@ -641,49 +648,66 @@ struct OverviewVariant: View {
 
 struct ProviderCard: View {
     let provider: ProviderState
+    let onOpen: () -> Void
     let onSwitch: (String) -> Void
+    @State private var isHovering = false
 
     var body: some View {
         VStack(spacing: 9) {
-            HStack {
-                ProviderMark(id: provider.id)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(provider.id.rawValue).font(.subheadline.bold())
-                    Text(provider.activeAccount?.name ?? "미연결")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if let usage = provider.usage.max(by: { $0.usedPercent < $1.usedPercent }) {
-                    UsageRing(percent: usage.usedPercent, color: provider.id.tint)
-                }
-            }
-
-            ForEach(provider.usage, id: \.label) { usage in
-                UsageLine(window: usage, tint: provider.id.tint)
-            }
-
-            HStack(spacing: 6) {
-                ForEach(provider.accounts) { account in
-                    Button {
-                        onSwitch(account.id)
-                    } label: {
-                        HStack(spacing: 4) {
-                            if account.id == provider.activeAccountID {
-                                Image(systemName: "checkmark.circle.fill")
-                            }
-                            Text(account.name)
-                        }
-                        .frame(maxWidth: .infinity)
+            VStack(spacing: 9) {
+                HStack {
+                    ProviderMark(id: provider.id)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(provider.id.rawValue).font(.subheadline.bold())
+                        Text(provider.activeAccount?.name ?? "미연결")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(!account.switchable)
+                    Spacer()
+                    if let usage = provider.usage.max(by: { $0.usedPercent < $1.usedPercent }) {
+                        UsageRing(percent: usage.usedPercent, color: provider.id.tint)
+                    }
+                }
+
+                ForEach(provider.usage, id: \.label) { usage in
+                    UsageLine(window: usage, tint: provider.id.tint)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onOpen)
+
+            if provider.accounts.count >= 2 {
+                HStack(spacing: 6) {
+                    ForEach(provider.accounts) { account in
+                        Button {
+                            onSwitch(account.id)
+                        } label: {
+                            HStack(spacing: 4) {
+                                if account.id == provider.activeAccountID {
+                                    Image(systemName: "checkmark.circle.fill")
+                                }
+                                Text(account.name)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(!account.switchable)
+                    }
                 }
             }
         }
         .padding(11)
-        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
+        .background {
+            if isHovering {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(provider.id.tint.opacity(0.10))
+            } else {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.quaternary.opacity(0.45))
+            }
+        }
+        .onHover { isHovering = $0 }
     }
 }
 
@@ -743,7 +767,10 @@ struct FocusVariant: View {
                         .font(.title3.bold())
                         .padding(.horizontal, 14)
                         .padding(.top, 14)
-                    OverviewVariant(store: store)
+                    OverviewVariant(store: store) { providerID in
+                        store.selectedProvider = providerID
+                        showsOverview = false
+                    }
                 }
             } else {
                 ProviderDetail(

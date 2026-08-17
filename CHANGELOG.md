@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.2] - 2026-08-17
+
+### Changed
+- **전체 화면 UX 정리** — 공급자 요약 카드를 누르면 해당 상세 탭으로 이동하고, 계정이 하나뿐인 공급자의 중복 계정 칩과 LIVE-only 상태의 `DEMO 0개` 문구를 숨긴다. 다중 계정 전환 칩과 실제 DEMO fallback 표시는 유지한다.
+
+### Fixed
+- **GitHub macOS 앱 빌드 호환성** — Swift 패키지 도구 버전을 `macos-14` 릴리스 러너의 Swift 5.10에 맞추고 정적 회귀 테스트로 고정해, 검증된 `Switchboard-macos.zip`이 Release 생성 전에 반드시 빌드되도록 한다.
+
+### Documentation
+- `README.md`와 `README.ko.md`에 GitHub 릴리스의 Swift 5.10 빌드 호환성 검증을 기록했다.
+
 ## [3.0.1] - 2026-08-17
 
 ### Changed
