@@ -9,13 +9,19 @@ One place to monitor and switch accounts for AI coding CLIs. The current CLI plu
 ![Switchboard demo with no personal information](docs/images/switchboard-overview.png)
 
 The app reads Claude/Codex usage APIs, Grok's local `/usage`, and Antigravity's
-read-only `/usage` and `/credits` JSON. It distinguishes `LIVE` from supporting
-`DEMO` rows, shows usage/reset times and provider-reported credits, and recommends
-an account from the remaining quota.
+read-only `/usage` and `/credits` JSON. Normal launches show `LIVE` data only:
+when live usage is unavailable, that provider is shown as unavailable rather
+than supplemented with sample data. `DEMO` samples are available only through
+the explicit `--demo-only` capture mode. The app shows usage/reset times and
+provider-reported credits, and recommends an account from the remaining quota.
 
 The provider-focused view is the default. Use `Overview` in the left sidebar to
 compare all four providers, or select Claude, Codex, Grok, or Gemini to inspect
 account details and available switching actions.
+
+The app uses each provider's unmodified official artwork or icon only to identify
+that provider. Switchboard is not affiliated with or endorsed by Anthropic,
+OpenAI, xAI/X, or Google; their marks remain their respective owners' property.
 
 | Provider | Status | App action |
 |---|---|---|

@@ -20,6 +20,14 @@ enum ProviderID: String, CaseIterable, Identifiable {
         }
     }
 
+    var appIconResourceName: String {
+        "ProviderIcon-\(rawValue.lowercased())"
+    }
+
+    var appIconResourceExtension: String {
+        self == .codex ? "png" : "jpg"
+    }
+
     var tint: Color {
         switch self {
         case .claude: Color(red: 0.83, green: 0.39, blue: 0.22)
@@ -845,18 +853,36 @@ struct ProviderDetail: View {
             }
 
             if provider.id == .grok {
-                Link("Grok 웹에서 재설정 상태 확인/적용", destination: URL(string: "https://grok.com/?referrer=website#settings/usage")!)
-                    .font(.caption)
-                Text("재설정 횟수와 만료일은 로컬 공식 API가 확인되기 전까지 표시하지 않습니다.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Link("Grok 웹에서 재설정 상태 확인/적용", destination: URL(string: "https://grok.com/?referrer=website#settings/usage")!)
+                        .font(.caption)
+                    Text("재설정 횟수와 만료일은 로컬 공식 API가 확인되기 전까지 표시하지 않습니다.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.32), in: RoundedRectangle(cornerRadius: 8))
             }
 
             if provider.id == .gemini {
-                Label("AGY/Gemini는 계정 즉시 전환을 지원하지 않습니다. 사용량을 새로고침하거나 CLI에서 재인증하세요.", systemImage: "person.crop.circle.badge.exclamationmark")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 7) {
+                    Image(systemName: "person.crop.circle.badge.exclamationmark")
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("계정 전환 미지원")
+                            .font(.caption.weight(.semibold))
+                        Text("AGY/Gemini는 즉시 전환을 지원하지 않습니다. 사용량을 새로고침하거나 CLI에서 재인증하세요.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .layoutPriority(1)
+                }
                     .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
             }
 
@@ -906,28 +932,30 @@ struct AccountRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    ProviderMark(id: provider, compact: true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(account.name).font(.subheadline.weight(.medium))
-                            Text(account.plan)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Text(account.origin.rawValue)
-                                .font(.caption2.bold())
-                                .foregroundStyle(account.origin.color)
-                            if isRecommended {
-                                Text("추천")
-                                    .font(.caption2.bold())
-                                    .foregroundStyle(.green)
-                            }
+            HStack(alignment: .top, spacing: 10) {
+                ProviderMark(id: provider, compact: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(account.name)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(2)
+                    HStack(spacing: 5) {
+                        AccountBadge(text: account.plan, color: .secondary)
+                        AccountBadge(text: account.origin.rawValue, color: account.origin.color)
+                        if isRecommended {
+                            AccountBadge(text: "추천", color: .green)
                         }
-                        Text(account.email)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
-                    Spacer()
+                    Text(account.email)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .layoutPriority(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 4) {
                     Circle().fill(account.health.color).frame(width: 7, height: 7)
                     Text(account.health.rawValue)
                         .font(.caption2)
@@ -947,77 +975,104 @@ struct AccountRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.top, 2)
+            }
 
-                if showsUsage {
-                    HStack(spacing: 6) {
-                        ForEach(Array(quotaSlots(for: account.usage).enumerated()), id: \.offset) { _, window in
-                            if let window {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("\(window.label)  사용 \(window.usedPercent)%  남음 \(100 - window.usedPercent)%")
-                                        .font(.caption2.monospacedDigit().weight(.medium))
-                                        .foregroundStyle(window.usedPercent >= 85 ? Color.red : Color.primary)
-                                        .lineLimit(1)
-                                    Label("\(window.resetsIn) 후 초기화", systemImage: "arrow.clockwise")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 5)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
-                            } else {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("추가 한도 · 미제공")
-                                        .font(.caption2.weight(.medium))
-                                        .foregroundStyle(.secondary)
-                                    Label("공급자 응답 없음", systemImage: "minus.circle")
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                }
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 5)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: 6))
-                            }
-                        }
+            if showsUsage {
+                HStack(spacing: 6) {
+                    ForEach(Array(quotaSlots(for: account.usage).enumerated()), id: \.offset) { _, window in
+                        QuotaChip(window: window)
                     }
-                    .padding(.leading, 35)
-
-                    HStack(spacing: 5) {
-                        Image(systemName: "ticket")
-                        if let benefit = account.benefits.first {
-                            Text("\(benefit.label) \(benefit.amount)")
-                                .fontWeight(.medium)
-                            Text("· \(benefit.detail)")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("추가 크레딧 없음")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(.caption2)
-                    .padding(.leading, 35)
                 }
+                .padding(.leading, 35)
 
-                if provider == .grok, let grokHome = account.grokHome, let onLaunchGrok {
+                HStack(spacing: 5) {
+                    Image(systemName: "ticket")
+                    if let benefit = account.benefits.first {
+                        Text("\(benefit.label) \(benefit.amount)")
+                            .fontWeight(.medium)
+                        Text("· \(benefit.detail)")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text("추가 크레딧 없음")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption2)
+                .padding(.leading, 35)
+            }
+
+            if provider == .grok, let grokHome = account.grokHome, let onLaunchGrok {
+                VStack(alignment: .leading, spacing: 4) {
                     Button("새 Grok 세션 열기") {
                         onLaunchGrok(grokHome)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .padding(.leading, 35)
                     Text("기존 세션은 바꾸지 않고 이 프로필의 GROK_HOME으로 새 세션을 시작합니다.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .padding(.leading, 35)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.leading, 35)
+            }
         }
         .padding(9)
         .background(
             isActive ? provider.tint.opacity(0.12) : Color.clear,
             in: RoundedRectangle(cornerRadius: 9)
         )
+    }
+}
+
+struct AccountBadge: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.bold())
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .truncationMode(.tail)
+    }
+}
+
+struct QuotaChip: View {
+    let window: UsageWindow?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let window {
+                Text("\(window.label) · \(window.usedPercent)% 사용")
+                    .font(.caption2.monospacedDigit().weight(.medium))
+                    .foregroundStyle(window.usedPercent >= 85 ? Color.red : Color.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Text("\(100 - window.usedPercent)% 남음 · \(window.resetsIn) 후")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.66)
+            } else {
+                Text("추가 한도 · 미제공")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                Text("공급자 응답 없음")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -1034,16 +1089,19 @@ struct RecommendationBanner: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("추천 · \(account.name)")
                     .font(.caption.bold())
-                Text(account.recommendationReason)
+                    .lineLimit(1)
+                Text(account.recommendationReason.replacingOccurrences(of: " / ", with: "\n"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 4)
+            .layoutPriority(1)
             Button(isActive ? "사용 중" : account.switchable ? "전환" : "전환 미연결", action: action)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(isActive || !account.switchable)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .padding(9)
         .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
@@ -1073,11 +1131,31 @@ struct ProviderMark: View {
     var compact = false
 
     var body: some View {
-        Image(systemName: id.icon)
-            .font(compact ? .caption.bold() : .body.bold())
-            .foregroundStyle(id.tint)
-            .frame(width: compact ? 25 : 31, height: compact ? 25 : 31)
-            .background(id.tint.opacity(0.13), in: RoundedRectangle(cornerRadius: compact ? 7 : 9))
+        if let brandIcon = Self.brandIcon(for: id) {
+            Image(nsImage: brandIcon)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: compact ? 25 : 31, height: compact ? 25 : 31)
+                .accessibilityHidden(true)
+        } else {
+            Image(systemName: id.icon)
+                .font(compact ? .caption.bold() : .body.bold())
+                .foregroundStyle(id.tint)
+                .frame(width: compact ? 25 : 31, height: compact ? 25 : 31)
+                .background(id.tint.opacity(0.13), in: RoundedRectangle(cornerRadius: compact ? 7 : 9))
+                .accessibilityHidden(true)
+        }
+    }
+
+    private static func brandIcon(for provider: ProviderID) -> NSImage? {
+        guard let url = Bundle.main.url(
+            forResource: provider.appIconResourceName,
+            withExtension: provider.appIconResourceExtension
+        ) else {
+            return nil
+        }
+        return NSImage(contentsOf: url)
     }
 }
 
