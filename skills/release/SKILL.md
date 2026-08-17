@@ -116,8 +116,16 @@ PREVIOUS_TAG="$(git tag --sort=-version:refname --list 'v[0-9]*' | head -n 1)"
 test -n "$PREVIOUS_TAG" || { echo "ERROR: previous release tag not found" >&2; exit 1; }
 python3 scripts/release_notes.py "{version}" --base-ref "$PREVIOUS_TAG" --output "$RELEASE_NOTES_FILE"
 test -s "$RELEASE_NOTES_FILE"
-python3 -m unittest discover -s tests -p 'test_*.py'
-python3 -m unittest discover -s prototype/switchboard-menubar/tests -p 'test_*.py'
+PYTHON38="$(command -v python3.8 || true)"
+if [[ -z "$PYTHON38" ]] && command -v uv >/dev/null 2>&1; then
+    PYTHON38="$(uv python find 3.8 2>/dev/null || true)"
+fi
+test -n "$PYTHON38" && test -x "$PYTHON38" || {
+    echo "ERROR: Python 3.8 is required for the release compatibility gate" >&2
+    exit 1
+}
+"$PYTHON38" -m unittest discover -s tests -p 'test_*.py'
+"$PYTHON38" -m unittest discover -s prototype/switchboard-menubar/tests -p 'test_*.py'
 bash tests/test_hooks_shell.sh
 bash tests/test_install_shell.sh
 bash -n install.sh hooks-handlers/session-start.sh hooks-handlers/prompt-submit.sh prototype/switchboard-menubar/run.sh prototype/switchboard-menubar/install.sh

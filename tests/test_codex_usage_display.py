@@ -1,7 +1,7 @@
 import io
 import re
 import unittest
-from contextlib import redirect_stdout
+from contextlib import ExitStack, redirect_stdout
 from unittest.mock import patch
 
 from claude_account_manager.commands import list_cmd
@@ -47,23 +47,55 @@ class CodexUsageDisplayTest(unittest.TestCase):
             return text
 
         stdout = io.StringIO()
-        with (
-            patch.object(list_cmd, "load_index", return_value={"accounts": []}),
-            patch.object(list_cmd, "get_current_account", return_value={}),
-            patch.object(list_cmd, "c", side_effect=render_color),
-            patch("claude_account_manager.ui.USE_COLOR", True),
-            patch("claude_account_manager.codex_provider.is_codex_available", return_value=True),
-            patch("claude_account_manager.codex_provider.load_codex_index", return_value=codex_index),
-            patch("claude_account_manager.codex_provider.get_current_codex_account_id", return_value="account-1"),
-            patch("claude_account_manager.codex_provider.read_codex_auth", side_effect=read_auth),
-            patch(
-                "claude_account_manager.codex_provider.get_codex_auth_info",
-                return_value={"name": "work", "email": "work@example.com", "plan": "Plus"},
-            ),
-            patch("claude_account_manager.codex_provider.fetch_codex_usage", side_effect=fetch_usage),
-            patch("claude_account_manager.codex_provider.get_codex_token_status", return_value="ok"),
-            redirect_stdout(stdout),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(list_cmd, "load_index", return_value={"accounts": []}))
+            stack.enter_context(patch.object(list_cmd, "get_current_account", return_value={}))
+            stack.enter_context(patch.object(list_cmd, "c", side_effect=render_color))
+            stack.enter_context(patch("claude_account_manager.ui.USE_COLOR", True))
+            stack.enter_context(
+                patch("claude_account_manager.codex_provider.is_codex_available", return_value=True)
+            )
+            stack.enter_context(
+                patch(
+                    "claude_account_manager.codex_provider.load_codex_index",
+                    return_value=codex_index,
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "claude_account_manager.codex_provider.get_current_codex_account_id",
+                    return_value="account-1",
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "claude_account_manager.codex_provider.read_codex_auth",
+                    side_effect=read_auth,
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "claude_account_manager.codex_provider.get_codex_auth_info",
+                    return_value={
+                        "name": "work",
+                        "email": "work@example.com",
+                        "plan": "Plus",
+                    },
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "claude_account_manager.codex_provider.fetch_codex_usage",
+                    side_effect=fetch_usage,
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "claude_account_manager.codex_provider.get_codex_token_status",
+                    return_value="ok",
+                )
+            )
+            stack.enter_context(redirect_stdout(stdout))
             list_cmd.cmd_list()
 
         return stdout.getvalue(), fetched_auth, live_auth
