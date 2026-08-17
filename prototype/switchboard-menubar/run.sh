@@ -17,7 +17,9 @@ for arg in "$@"; do
 done
 
 cd "$SCRIPT_DIR"
-swift build
+# Keep stdout machine-readable: callers capture the final app path from it.
+# Build diagnostics remain visible to interactive users and CI via stderr.
+swift build >&2
 
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$SCRIPT_DIR/Info.plist" "$APP_DIR/Contents/Info.plist"
