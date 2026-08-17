@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Claude Code Multi-Account Manager - Plugin Installer
+# Switchboard - Claude Code Plugin Installer
 # Claude Code 다중 계정 관리 플러그인 설치 스크립트
 #
 
@@ -24,7 +24,7 @@ INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
 SHELL_INTEGRATION="$PLUGIN_DIR/claude_account_manager/shell_integration.py"
 
 echo ""
-echo -e "${BOLD}  Claude Code Multi-Account Manager${NC}"
+echo -e "${BOLD}  Switchboard — AI Account Switcher${NC}"
 echo -e "${DIM}  ─────────────────────────────────────${NC}"
 echo ""
 

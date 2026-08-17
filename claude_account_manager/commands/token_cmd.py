@@ -10,7 +10,7 @@ from ..config import ACCOUNTS_DIR, SOFT_BLOCK_TTL_HOURS
 from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
 from ..keychain import get_keychain_credential
-from ..token import TokenStatus, check_token_status, refresh_access_token, is_token_expiring_soon, is_token_expired, is_token_fresh, is_credential_valid, classify_refresh_error, RefreshError
+from ..token import TokenStatus, check_token_status, refresh_access_token, persist_credential_file, is_token_expiring_soon, is_token_expired, is_token_fresh, is_credential_valid, classify_refresh_error, RefreshError
 from ..api import _fetch_usage_from_api
 from ..account import detect_plan_from_credential, is_same_account
 from ..owner import credential_matches_slot
@@ -97,15 +97,21 @@ def _safe_refresh_credential(credential_path, acc_id, skip_fresh_check=False):
         log_token_info(acc_id, credential, "갱신 전 ")
         new_credential, error = refresh_access_token(credential)
 
-        if new_credential:
-            # 5. 성공 → 파일 저장 (fsync로 원자적 기록 보장)
-            with open(credential_path, 'w', encoding='utf-8') as f:
-                f.write(json.dumps(new_credential, indent=2, ensure_ascii=False))
-                f.flush()
-                os.fsync(f.fileno())
-            os.chmod(credential_path, 0o600)
+        if new_credential and not error:
+            # 5. 성공 → 원본을 truncate하지 않는 원자적 저장. replace 실패 시
+            # 회전된 one-time token은 private recovery 파일에 남는다.
+            saved, recovery_path = persist_credential_file(
+                new_credential, credential_path
+            )
+            if not saved:
+                if recovery_path:
+                    return new_credential, "파일 저장 실패; 새 credential 복구 파일: %s" % recovery_path
+                return new_credential, "파일 저장 실패; 새 credential 복구도 실패"
             log_token_info(acc_id, new_credential, "갱신 후 ")
             return new_credential, None
+
+        if new_credential and error:
+            return new_credential, error
 
         # 6. 실패 → 파일 다시 읽기 (다른 프로세스가 갱신했을 수 있음)
         log("WARN", f"[{acc_id}] 갱신 실패: {error}")
@@ -232,15 +238,16 @@ def _auto_migrate(index, current):
                     if credential_matches_slot(keychain_cred, acc) is not True:
                         log("WARN", f"[migrate] {acc['id']}: Keychain 토큰 소유자 불일치/확인불가 → credential 생성 스킵")
                     else:
-                        with open(cred_path, 'w', encoding='utf-8') as f:
-                            f.write(json.dumps(keychain_cred, indent=2, ensure_ascii=False))
-                            f.flush()
-                            os.fsync(f.fileno())
-                        os.chmod(cred_path, 0o600)
-                        acc["credentialFile"] = cred_file
-                        migrated = True
-                        log("INFO", f"[migrate] {acc['id']}: credential 파일 생성 (keychain)")
-                        print(f"[migrate] {acc['id']}: credential 저장됨")
+                        saved, recovery_path = persist_credential_file(
+                            keychain_cred, cred_path
+                        )
+                        if saved:
+                            acc["credentialFile"] = cred_file
+                            migrated = True
+                            log("INFO", f"[migrate] {acc['id']}: credential 파일 생성 (keychain)")
+                            print(f"[migrate] {acc['id']}: credential 저장됨")
+                        else:
+                            log("WARN", f"[migrate] {acc['id']}: credential 저장 실패 (recovery={recovery_path})")
             elif cred_path.exists():
                 # 비활성 계정: 디스크에 파일이 있으면 index만 복구
                 acc["credentialFile"] = cred_file
@@ -333,6 +340,7 @@ def cmd_refresh_all():
                 lock_path = credential_path.parent / f"{credential_path.name}.lock"
                 lock_fd = None
                 locked = False
+                stored = False
                 try:
                     lock_fd = open(lock_path, "w")
                     try:
@@ -342,11 +350,11 @@ def cmd_refresh_all():
                         log("WARN", f"[{acc['id']}] 현재 계정 credential 락 획득 실패 → 스킵")
 
                     if locked:
-                        with open(credential_path, 'w', encoding='utf-8') as f:
-                            f.write(json.dumps(current_credential, indent=2, ensure_ascii=False))
-                            f.flush()
-                            os.fsync(f.fileno())
-                        os.chmod(credential_path, 0o600)
+                        stored, recovery_path = persist_credential_file(
+                            current_credential, credential_path
+                        )
+                        if not stored:
+                            log("WARN", f"[{acc['id']}] 현재 계정 credential 저장 실패 (recovery={recovery_path})")
                 finally:
                     if lock_fd is not None:
                         try:
@@ -358,6 +366,10 @@ def cmd_refresh_all():
                             lock_path.unlink(missing_ok=True)
                         except Exception:
                             pass
+
+                if not stored:
+                    skipped_count += 1
+                    continue
 
                 # Plan도 갱신
                 detected_plan = detect_plan_from_credential(current_credential)
@@ -475,15 +487,13 @@ def cmd_refresh_expiring(hours=1):
                             if credential_matches_slot(kc_cred, acc) is not True:
                                 log("WARN", f"[{acc['id']}] Keychain 토큰 소유자 불일치/확인불가 → 동기화 스킵")
                             else:
-                                try:
-                                    with open(credential_path, 'w', encoding='utf-8') as f:
-                                        f.write(json.dumps(kc_cred, indent=2, ensure_ascii=False))
-                                        f.flush()
-                                        os.fsync(f.fileno())
-                                    os.chmod(credential_path, 0o600)
+                                saved, recovery_path = persist_credential_file(
+                                    kc_cred, credential_path
+                                )
+                                if saved:
                                     log("INFO", f"[{acc['id']}] Keychain → 파일 credential 동기화")
-                                except Exception as e:
-                                    log("WARN", f"[{acc['id']}] credential 동기화 실패: {e}")
+                                else:
+                                    log("WARN", f"[{acc['id']}] credential 동기화 실패 (recovery={recovery_path})")
                 break
 
     for acc in index["accounts"]:

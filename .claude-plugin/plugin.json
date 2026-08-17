@@ -1,11 +1,11 @@
 {
   "name": "account",
-  "description": "Claude Code multi-account manager - switch accounts, monitor usage, auto-refresh tokens",
+  "description": "Switchboard for Claude Code - switch accounts, monitor usage, auto-refresh tokens",
   "version": "2.5.10",
   "author": {
     "name": "ezhoon"
   },
-  "repository": "https://github.com/ezhoon/multi-login-claude",
+  "repository": "https://github.com/lee-ji-hoon/ai-account-switcher",
   "keywords": ["account", "multi-account", "oauth", "usage", "switch"],
   "skills": "./skills/"
 }

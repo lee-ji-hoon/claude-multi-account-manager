@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Claude Account Manager - 빌드/배포 스크립트
+# Switchboard - 빌드/배포 스크립트
 #
 
 set -e
@@ -15,7 +15,7 @@ YELLOW='\033[0;33m'
 NC='\033[0m'
 
 echo ""
-echo -e "${CYAN}Claude Account Manager - Build${NC}"
+echo -e "${CYAN}Switchboard - Build${NC}"
 echo "──────────────────────────────────"
 
 # 1. 심볼릭 링크를 실제 파일로 복사

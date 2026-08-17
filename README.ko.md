@@ -1,14 +1,65 @@
-# Claude Code Multi-Account Manager
+# Switchboard — AI Account Switcher
 
 [English](README.md)
 
-Claude Code 다중 계정 관리 플러그인. 여러 계정을 **로그아웃 없이** 전환하고, 사용량을 한눈에 모니터링합니다.
+AI 코딩 CLI 계정을 한곳에서 모니터링하고 전환합니다. 현재 CLI 플러그인은 Claude Code와 Codex를 지원하며, 네이티브 macOS 메뉴바 프로토타입은 Claude·Codex·Grok·Antigravity(`agy`) 기반 Gemini 실사용량을 읽습니다.
 
-## 설치
+## macOS 메뉴바 앱
+
+![개인정보가 포함되지 않은 Switchboard 데모 화면](docs/images/switchboard-overview.png)
+
+Claude/Codex usage API, Grok 로컬 `/usage`, Antigravity의 읽기 전용
+`/usage`·`/credits` JSON을 읽습니다. `LIVE`와 보강용 `DEMO`를 구분하며,
+사용량·초기화 시각·Codex 리셋 크레딧·AGY 크레딧을 표시하고 남은 한도에
+따라 계정을 추천합니다.
+
+| 공급자 | 상태 읽기 | 앱 동작 |
+|---|---|---|
+| Claude | 5시간/주간 사용량, 초기화, 토큰 상태 | 저장 계정 전환 후 프로필·Keychain·계정 ID readback 확인 |
+| Codex | 5시간/주간 사용량, 초기화, 리셋/추가 크레딧 | 저장 계정 전환 후 `auth.json` account ID readback 확인 |
+| Grok | 주간 사용량과 초기화 | 기존 세션은 유지하고 선택한 `GROK_HOME` 프로필로 새 세션 실행 |
+| Antigravity (`agy`) | Gemini 모델 quota와 크레딧 | 공식 계정 전환 명령이 없어 CLI 재인증 안내만 제공 |
+
+Grok 웹의 “사용 한도 재설정” 횟수·만료일은 안정된 로컬 API가 없으므로
+앱에서 값을 추측하지 않습니다. 대신 웹 Usage 화면을 여는 링크를 제공하고,
+재설정 적용·크레딧 구매·자동 충전은 실행하지 않습니다.
+
+### 앱 설치
+
+릴리스의 `Switchboard-macos.zip`을 풀어 `Switchboard.app`을
+`~/Applications`에 놓거나, 저장소에서 직접 빌드해 설치합니다.
+
+```bash
+git clone https://github.com/lee-ji-hoon/ai-account-switcher.git
+cd ai-account-switcher
+prototype/switchboard-menubar/install.sh
+open "$HOME/Applications/Switchboard.app"
+```
+
+앱의 LIVE 조회·전환에는 Python 3.8 이상이 필요합니다(Homebrew Python 또는
+Xcode Command Line Tools의 `python3`). 로컬 빌드는 Xcode Command Line Tools와
+macOS 14 이상이 필요합니다. GitHub 릴리스 앱은 ad-hoc 서명이라 macOS가 차단하면 Finder에서 앱을 Control-클릭한
+뒤 **열기**를 선택하거나 위 로컬 빌드 설치를 사용하세요.
+
+Grok 계정을 여러 개 쓰려면 인증 파일을 복사하지 말고 프로필마다 한 번씩
+공식 로그인을 진행합니다.
+
+```bash
+mkdir -p "$HOME/.grok-profiles/personal"
+GROK_HOME="$HOME/.grok-profiles/personal" grok login --oauth
+
+mkdir -p "$HOME/.grok-profiles/work"
+GROK_HOME="$HOME/.grok-profiles/work" grok login --oauth
+```
+
+Switchboard는 `~/.grok`과 `~/.grok-profiles/*`의 로그인된 프로필만 표시하며,
+`auth.json`을 복사하거나 서로 교체하지 않습니다.
+
+## Claude 플러그인 설치
 
 ```bash
 # 마켓플레이스 등록 (최초 1회)
-claude plugin marketplace add https://github.com/lee-ji-hoon/claude-multi-account-manager.git
+claude plugin marketplace add https://github.com/lee-ji-hoon/ai-account-switcher.git
 
 # 플러그인 설치
 claude plugin install account@lee-ji-hoon
@@ -145,7 +196,7 @@ cat ~/.claude/accounts/logs/token-refresh.log
 
 ## 기여
 
-버그 리포트나 기능 제안은 [Issues](https://github.com/lee-ji-hoon/claude-multi-account-manager/issues)에 등록해주세요.
+버그 리포트나 기능 제안은 [Issues](https://github.com/lee-ji-hoon/ai-account-switcher/issues)에 등록해주세요.
 Claude Code 세션에서 `/account:report`를 실행하면 진단 정보가 포함된 Issue가 자동 생성됩니다.
 
 ## 라이선스

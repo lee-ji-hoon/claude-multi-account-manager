@@ -2,7 +2,10 @@
 Anthropic API calls for usage fetching
 """
 import json
+import hashlib
+import os
 import re
+import tempfile
 import urllib.request
 import urllib.error
 from datetime import datetime, date, timedelta
@@ -102,7 +105,9 @@ def _load_usage_cache():
     """계정별 사용량 캐시 로드"""
     try:
         if ACCOUNT_USAGE_CACHE.exists():
-            return json.loads(ACCOUNT_USAGE_CACHE.read_text())
+            cache = json.loads(ACCOUNT_USAGE_CACHE.read_text())
+            # v2.5.10 and older stored raw access-token prefixes as keys.
+            return {key: value for key, value in cache.items() if len(key) == 64}
     except Exception:
         pass
     return {}
@@ -110,10 +115,32 @@ def _load_usage_cache():
 
 def _save_usage_cache(cache):
     """계정별 사용량 캐시 저장"""
+    temporary_path = None
     try:
-        ACCOUNT_USAGE_CACHE.write_text(json.dumps(cache))
+        ACCOUNT_USAGE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(ACCOUNT_USAGE_CACHE.parent),
+            prefix=".usage-cache.",
+            delete=False,
+        ) as temporary:
+            temporary.write(json.dumps(cache))
+            temporary_path = temporary.name
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, ACCOUNT_USAGE_CACHE)
     except Exception:
         pass
+    finally:
+        if temporary_path:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
+
+
+def _usage_cache_key(access_token):
+    return hashlib.sha256(access_token.encode("utf-8")).hexdigest()
 
 
 def _get_cached_usage(account_key):
@@ -217,7 +244,13 @@ def _parse_retry_response(api_data, plan_name):
     return result
 
 
-def _fetch_usage_from_api(credential=None, include_token_status=False, credential_file=None):
+def _fetch_usage_from_api(
+    credential=None,
+    include_token_status=False,
+    credential_file=None,
+    _allow_refresh=True,
+    _allow_cache=True,
+):
     """
     Anthropic API에서 직접 사용량 가져오기 (429 시 캐시 활용)
 
@@ -226,6 +259,9 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
         include_token_status: 토큰 상태도 함께 반환할지 여부
         credential_file: credential 파일 경로 (저장된 계정용, 토큰 갱신 시 저장에 사용)
     """
+    # 401 갱신 시 현재 계정의 새 one-time refresh token을 Keychain에 되써야 한다.
+    from_keychain = credential is None
+
     # credential이 없으면 Keychain에서 읽기
     if credential is None:
         credential = get_keychain_credential()
@@ -242,8 +278,7 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
             return None, TokenStatus.NO_TOKEN
         return None
 
-    # 캐시 키: 토큰 앞 20자 해시 (계정 식별용)
-    cache_key = access_token[:20]
+    cache_key = _usage_cache_key(access_token)
 
     # Plan 이름 결정 (subscriptionType 우선, Team Premium은 rateLimitTier에 max_5x가 있을 수 있음)
     sub_lower = subscription_type.lower()
@@ -295,9 +330,27 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
 
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            new_credential, refresh_error = refresh_access_token(credential, credential_file=credential_file)
+            if not _allow_refresh:
+                if include_token_status:
+                    return None, TokenStatus.EXPIRED
+                return None
+            refresh_credential = None if from_keychain else credential
+            new_credential, refresh_error = refresh_access_token(
+                refresh_credential,
+                credential_file=credential_file,
+            )
             if new_credential:
-                return _fetch_usage_from_api(new_credential, include_token_status, credential_file=None)
+                if refresh_error:
+                    if include_token_status:
+                        return None, TokenStatus.ERROR
+                    return None
+                return _fetch_usage_from_api(
+                    new_credential,
+                    include_token_status,
+                    credential_file=None,
+                    _allow_refresh=False,
+                    _allow_cache=_allow_cache,
+                )
             if include_token_status:
                 return None, TokenStatus.EXPIRED
             return None
@@ -307,7 +360,7 @@ def _fetch_usage_from_api(credential=None, include_token_status=False, credentia
             return None
         elif e.code == 429:
             # Rate limited → 캐시에서 반환 (재시도 없이 즉시)
-            cached = _get_cached_usage(cache_key)
+            cached = _get_cached_usage(cache_key) if _allow_cache else None
             if cached:
                 if include_token_status:
                     return cached, TokenStatus.VALID

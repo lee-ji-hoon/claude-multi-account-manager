@@ -5,10 +5,10 @@ import json
 import shutil
 from pathlib import Path
 
-from ..config import __version__, PACKAGE_NAME
+from ..config import __version__
 from ..ui import c, Colors
 from ..storage import load_index, save_index, get_current_account
-from ..version import check_for_updates
+from ..version import UPDATE_COMMAND, check_for_updates
 
 
 def cmd_current():
@@ -177,7 +177,7 @@ def cmd_update():
         print(f"  새 버전 발견: {c(Colors.GREEN, latest)} (현재: {__version__})")
         print()
         print(f"  {c(Colors.CYAN, '업데이트 명령:')}")
-        print(f"    pip install --upgrade {PACKAGE_NAME}")
+        print(f"    {UPDATE_COMMAND}")
         print()
     else:
         print(f"  {c(Colors.GREEN, '✓')} 최신 버전입니다: {__version__}")
@@ -186,19 +186,19 @@ def cmd_update():
 
 def cmd_version():
     """버전 정보 표시"""
-    print(f"Claude Account Manager v{__version__}")
+    print(f"Switchboard v{__version__}")
 
     # 업데이트 확인 (백그라운드 캐시 사용)
     latest = check_for_updates(silent=True)
     if latest:
         print(f"  {c(Colors.YELLOW, '⬆')} 새 버전: {latest}")
-        print(f"  pip install --upgrade {PACKAGE_NAME}")
+        print(f"  {UPDATE_COMMAND}")
 
 
 def cmd_help():
     """도움말 표시"""
     print(f"""
-{c(Colors.BOLD, '  Claude Account Manager')} v{__version__} - 다중 계정 관리
+{c(Colors.BOLD, '  Switchboard')} v{__version__} - AI 계정 관리
 {c(Colors.DIM, '  ' + '─' * 50)}
 
   {c(Colors.CYAN, '사용법')}: /account [action] [args]

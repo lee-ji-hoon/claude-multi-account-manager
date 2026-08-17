@@ -60,29 +60,38 @@ def get_keychain_credential():
 
 
 def set_keychain_credential(credential_data):
-    """Keychain에 Claude Code credential 저장"""
+    """Keychain credential을 기존 항목 삭제 없이 갱신하고 readback한다."""
     try:
         credential_json = json.dumps(credential_data, ensure_ascii=False)
-
-        # 기존 항목 삭제 (있는 경우)
-        subprocess.run(
-            ["security", "delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT],
-            capture_output=True
-        )
 
         # NOTE: macOS security CLI는 -w 인자로만 password를 받을 수 있어
         # 프로세스 목록(ps)에 순간적으로 credential이 노출될 수 있음.
         # security CLI의 제약으로 stdin/pipe 전달은 불가.
-        # 새 항목 추가
+        # -U는 기존 항목을 제자리 갱신한다. delete-then-add는 add 실패 시
+        # one-time refresh token의 유일한 영속 사본을 제거하므로 금지한다.
         result = subprocess.run(
-            ["security", "add-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w", credential_json],
+            [
+                "security",
+                "add-generic-password",
+                "-U",
+                "-s",
+                KEYCHAIN_SERVICE,
+                "-a",
+                KEYCHAIN_ACCOUNT,
+                "-w",
+                credential_json,
+            ],
             capture_output=True, text=True
         )
 
         if result.returncode != 0:
             print(f"  Keychain 저장 실패: {result.stderr}")
             return False
+        saved = _read_keychain_entry(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+        if saved != credential_data:
+            print("  Keychain 저장 실패: readback 불일치")
+            return False
         return True
-    except subprocess.SubprocessError as e:
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError) as e:
         print(f"  Keychain 저장 실패: {e}")
         return False

@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-app:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require release tag to be current main
+        run: |
+          git fetch origin main
+          tag_sha="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          main_sha="$(git rev-parse origin/main)"
+          test "$tag_sha" = "$main_sha" || { echo "ERROR: release tag must point exactly to origin/main" >&2; exit 1; }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+      - name: Require a monotonically increasing release version
+        run: |
+          python3 - "$GITHUB_REF_NAME" <<'PY'
+          import re
+          import subprocess
+          import sys
+
+          tag = sys.argv[1]
+          match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag)
+          if not match:
+              raise SystemExit("ERROR: release tag must be strict vN.N.N semver")
+          current = tuple(int(part) for part in match.groups())
+          tags = subprocess.check_output(["git", "tag", "--list"], text=True).splitlines()
+          prior = []
+          for candidate in tags:
+              found = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", candidate)
+              if found and candidate != tag:
+                  prior.append((tuple(int(part) for part in found.groups()), candidate))
+          if prior:
+              highest, highest_tag = max(prior)
+              if current <= highest:
+                  raise SystemExit(
+                      "ERROR: release version must be greater than %s" % highest_tag
+                  )
+          PY
+      - name: Run complete release gate
+        run: |
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          python3 -m unittest discover -s prototype/switchboard-menubar/tests -p 'test_*.py'
+          bash tests/test_hooks_shell.sh
+          bash tests/test_install_shell.sh
+      - name: Build and verify Switchboard.app
+        run: |
+          app_path="$(prototype/switchboard-menubar/run.sh --build-only | tail -n 1)"
+          test -d "$app_path"
+          codesign --verify --deep --strict "$app_path"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" Switchboard-macos.zip
+          test -s Switchboard-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: switchboard-macos-release
+          path: Switchboard-macos.zip
+          if-no-files-found: error
+
+  publish-release:
+    needs: build-macos-app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Recheck release tag against current main
+        run: |
+          git fetch origin main
+          tag_sha="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          main_sha="$(git rev-parse origin/main)"
+          test "$tag_sha" = "$main_sha" || { echo "ERROR: release tag must point exactly to origin/main" >&2; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          name: switchboard-macos-release
+      - name: Validate and render release notes
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_VERSION#v}"
+          previous_tag="$(git tag --sort=-version:refname --merged HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vx "$RELEASE_VERSION" | head -n 1)"
+          test -n "$previous_tag"
+          python3 scripts/release_notes.py "$version" --base-ref "$previous_tag" --output release-notes.md
+      - name: Publish GitHub Release with macOS app
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${{ github.ref_name }}"
+          Switchboard-macos.zip
+          --repo "${{ github.repository }}"
+          --verify-tag
+          --title "Switchboard ${{ github.ref_name }}"
+          --notes-file release-notes.md

@@ -1,5 +1,5 @@
 """
-Configuration constants and paths for Claude Account Manager
+Configuration constants and paths for Switchboard
 """
 import json
 from pathlib import Path
@@ -18,6 +18,8 @@ def _get_version():
 
 
 __version__ = _get_version()
+# Legacy Python distribution identifier. The product/repository brand is
+# Switchboard, but this identifier must never point at an unrelated PyPI project.
 PACKAGE_NAME = "claude-account-manager"
 
 # Path constants
