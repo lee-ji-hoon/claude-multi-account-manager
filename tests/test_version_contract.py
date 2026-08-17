@@ -211,6 +211,13 @@ class VersionContractTests(unittest.TestCase):
         self.assertIn('CFBundleShortVersionString', run_script)
         self.assertIn('CFBundleVersion', run_script)
 
+    def test_macos_package_uses_release_runner_swift_tools_version(self):
+        package = (ROOT / "prototype/switchboard-menubar/Package.swift").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("// swift-tools-version: 5.10", package)
+        self.assertNotIn("// swift-tools-version: 6.0", package)
+
     def test_tag_workflow_enforces_and_publishes_release_notes(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
