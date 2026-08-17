@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Claude Code Multi-Account Manager
+Switchboard — AI Account Switcher
 다중 계정을 관리하는 스크립트
 
 Usage:

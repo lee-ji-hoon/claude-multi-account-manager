@@ -1,5 +1,5 @@
 """
-Claude Account Manager - Multi-account management for Claude Code
+Switchboard - Multi-account management for AI coding CLIs
 
 This package provides tools to manage multiple Claude accounts,
 including OAuth token management and account switching.

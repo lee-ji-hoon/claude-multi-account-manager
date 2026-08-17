@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "lee-ji-hoon",
-  "description": "Claude Code multi-account manager - switch accounts without logout",
+  "description": "Switchboard account switcher for Claude Code",
   "owner": {
     "name": "lee-ji-hoon",
     "email": "lee-ji-hoon@example.com"
@@ -9,15 +9,15 @@
   "plugins": [
     {
       "name": "account",
-      "description": "Claude Code multi-account manager plugin. Manage and switch between multiple accounts without logout.",
-      "version": "2.5.10",
+      "description": "Switchboard plugin for Claude Code. Manage and switch between multiple accounts without logout.",
+      "version": "3.0.0",
       "author": {
         "name": "lee-ji-hoon",
         "email": "lee-ji-hoon@example.com"
       },
       "source": "./",
       "category": "productivity",
-      "homepage": "https://github.com/lee-ji-hoon/claude-multi-account-manager",
+      "homepage": "https://github.com/lee-ji-hoon/ai-account-switcher",
       "tags": ["multi-account", "account-manager", "oauth", "keychain"]
     }
   ]

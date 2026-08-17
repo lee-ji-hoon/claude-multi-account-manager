@@ -1,6 +1,9 @@
 """
 Command router and main entry point
 """
+import contextlib
+import io
+import json
 import sys
 
 from .list_cmd import cmd_list
@@ -47,6 +50,25 @@ def main():
     elif args[0] == "switch":
         account_id = args[1] if len(args) > 1 else None
         cmd_switch(account_id)
+    elif args[0] == "switch-provider":
+        if len(args) != 4 or args[3] != "--json":
+            from ..provider_switch import SwitchResult
+            result = SwitchResult(
+                ok=False,
+                provider=args[1].lower() if len(args) > 1 else "",
+                requestedAccountID=args[2] if len(args) > 2 else "",
+                activeAccountID=None,
+                restartRequired=False,
+                message="사용법: switch-provider <provider> <account-id> --json",
+            )
+        else:
+            from ..provider_switch import switch_provider
+            # Keychain adapters can emit legacy diagnostics.  The public JSON
+            # seam must remain exactly one machine-readable object.
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = switch_provider(args[1], args[2])
+        print(json.dumps(result.to_dict(), ensure_ascii=False))
+        raise SystemExit(0 if result.ok else 1)
     elif args[0] in ("remove", "rm", "delete"):
         account_id = args[1] if len(args) > 1 else None
         cmd_remove(account_id)

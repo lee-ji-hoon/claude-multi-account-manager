@@ -3,6 +3,45 @@ from __future__ import annotations
 """Codex 계정 통합 브리지 — ~/.codex/auth.json 읽기/쓰기"""
 from pathlib import Path
 import json, os
+import re
+
+
+_ACCOUNT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def _atomic_write_json(path: Path, data: dict) -> bool:
+    """Write private JSON without exposing partial content at the final path."""
+    import tempfile
+
+    temporary_path = None
+    descriptor = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_path = tempfile.mkstemp(
+            dir=str(path.parent), prefix=".%s." % path.name
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as temporary:
+            descriptor = None
+            json.dump(data, temporary, indent=2, ensure_ascii=False)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, path)
+        temporary_path = None
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if temporary_path is not None:
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                pass
 
 
 def _decode_jwt_payload(token: str) -> dict:
@@ -63,19 +102,7 @@ def read_codex_auth(auth_file: Path = None) -> dict | None:
 
 def write_codex_auth(data: dict, auth_file: Path = None) -> bool:
     path = auth_file or CODEX_AUTH_FILE
-    try:
-        import tempfile
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(dir=path.parent)
-        try:
-            os.write(fd, json.dumps(data, indent=2, ensure_ascii=False).encode())
-            os.chmod(tmp_path, 0o600)
-            os.replace(tmp_path, path)
-        finally:
-            os.close(fd)
-        return True
-    except Exception:
-        return False
+    return _atomic_write_json(path, data)
 
 
 def get_current_codex_account_id() -> str | None:
@@ -95,7 +122,10 @@ def get_codex_token_status(acc: dict) -> str:
     쓰고, exp가 없으면 last_refresh + 240h로 폴백.
     """
     from datetime import datetime, timedelta
-    auth_file = CODEX_ACCOUNTS_DIR / f"auth_{acc['id']}.json"
+    account_id = acc.get("id")
+    if not isinstance(account_id, str) or not _ACCOUNT_ID.fullmatch(account_id):
+        return "no_auth"
+    auth_file = CODEX_ACCOUNTS_DIR / f"auth_{account_id}.json"
     auth = read_codex_auth(auth_file)
     if not auth:
         return "no_auth"
@@ -135,10 +165,19 @@ def get_codex_token_status(acc: dict) -> str:
 def switch_codex_account(acc: dict) -> tuple[bool, str]:
     """Codex 계정으로 전환: auth_file → ~/.codex/auth.json 교체"""
     from datetime import datetime
-    auth_file = CODEX_ACCOUNTS_DIR / f"auth_{acc['id']}.json"
+    account_id = acc.get("id")
+    if not isinstance(account_id, str) or not _ACCOUNT_ID.fullmatch(account_id):
+        return False, "유효하지 않은 Codex 계정 ID입니다"
+    auth_file = CODEX_ACCOUNTS_DIR / f"auth_{account_id}.json"
+    if auth_file.is_symlink():
+        return False, "심볼릭 링크 인증 파일은 사용할 수 없습니다"
     auth = read_codex_auth(auth_file)
     if not auth:
-        return False, f"인증 파일 없음: auth_{acc['id']}.json"
+        return False, f"인증 파일 없음: auth_{account_id}.json"
+    expected_account_id = acc.get("account_id")
+    stored_account_id = auth.get("tokens", {}).get("account_id")
+    if not expected_account_id or stored_account_id != expected_account_id:
+        return False, "저장된 auth identity가 계정 인덱스와 일치하지 않습니다"
 
     # 백업
     backup_dir = CODEX_ACCOUNTS_DIR / "backups"
@@ -147,19 +186,7 @@ def switch_codex_account(acc: dict) -> tuple[bool, str]:
     current = read_codex_auth()
     if current:
         bk = backup_dir / f"auth_{ts}.json"
-        try:
-            import tempfile
-            fd, tmp = tempfile.mkstemp(dir=backup_dir)
-            os.write(fd, json.dumps(current, indent=2, ensure_ascii=False).encode())
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, bk)
-        except Exception:
-            pass
-        finally:
-            try:
-                os.close(fd)
-            except Exception:
-                pass
+        write_codex_auth(current, bk)
         # 오래된 백업 정리 (최근 5개)
         backups = sorted(backup_dir.glob("auth_*.json"), key=lambda p: p.stat().st_mtime)
         for old in backups[:-5]:
@@ -169,19 +196,36 @@ def switch_codex_account(acc: dict) -> tuple[bool, str]:
                 pass
 
     if write_codex_auth(auth):
+        if get_current_codex_account_id() != expected_account_id:
+            restored = False
+            active_after_write = read_codex_auth()
+            # Compare-and-swap rollback: only undo the exact value written by
+            # this transaction. A concurrent login/refresh owns any other value.
+            if active_after_write == auth:
+                if current:
+                    restored = write_codex_auth(current)
+                else:
+                    try:
+                        CODEX_AUTH_FILE.unlink()
+                        restored = not CODEX_AUTH_FILE.exists()
+                    except OSError:
+                        restored = False
+            elif active_after_write == current:
+                restored = True
+            else:
+                restored = False
+            suffix = "" if restored else " (이전 auth 자동 복구 실패)"
+            return False, "auth.json 전환 후 readback 불일치%s" % suffix
         # last_used 업데이트
         try:
             index = load_codex_index()
             for a in index["accounts"]:
-                if a["id"] == acc["id"]:
+                if a["id"] == account_id:
                     a["last_used"] = datetime.now().isoformat()
-            CODEX_ACCOUNTS_DIR.mkdir(parents=True, exist_ok=True)
-            tmp2 = CODEX_INDEX_FILE.with_suffix(".tmp")
-            tmp2.write_text(json.dumps(index, indent=2, ensure_ascii=False))
-            tmp2.rename(CODEX_INDEX_FILE)
+            _atomic_write_json(CODEX_INDEX_FILE, index)
         except Exception:
             pass
-        return True, acc["name"]
+        return True, acc.get("name") or account_id
     return False, "auth.json 쓰기 실패"
 
 

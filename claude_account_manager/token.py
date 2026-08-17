@@ -3,15 +3,99 @@ OAuth token management: expiration, refresh, status checking
 """
 import json
 import os
+import tempfile
 import time
 import urllib.request
 import urllib.error
 import urllib.parse
 from datetime import datetime, timedelta
+from pathlib import Path
 
-from .config import TOKEN_VALIDITY_HOURS, TOKEN_FRESH_THRESHOLD_HOURS, REFRESH_MAX_RETRIES, REFRESH_RETRY_BACKOFF_BASE
+from .config import ACCOUNTS_DIR, TOKEN_VALIDITY_HOURS, TOKEN_FRESH_THRESHOLD_HOURS, REFRESH_MAX_RETRIES, REFRESH_RETRY_BACKOFF_BASE
 from .keychain import get_keychain_credential, set_keychain_credential
 from .logger import log, log_token_info
+
+
+TOKEN_RECOVERY_DIR = ACCOUNTS_DIR / "refresh-recovery"
+
+
+def _write_recovery_credential(credential, directory, prefix):
+    """Persist a rotated credential as a private recovery file."""
+    descriptor = None
+    recovery_path = None
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        os.chmod(directory, 0o700)
+        descriptor, raw_path = tempfile.mkstemp(dir=str(directory), prefix=prefix, suffix=".json")
+        recovery_path = Path(raw_path)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as recovery_file:
+            descriptor = None
+            json.dump(credential, recovery_file, indent=2, ensure_ascii=False)
+            recovery_file.flush()
+            os.fsync(recovery_file.fileno())
+        os.chmod(recovery_path, 0o600)
+        return recovery_path
+    except (OSError, TypeError, ValueError):
+        if recovery_path is not None:
+            try:
+                recovery_path.unlink()
+            except OSError:
+                pass
+        return None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def persist_credential_file(credential, credential_file):
+    """Atomically persist credential, retaining the temp file on replace failure.
+
+    Returns ``(saved, recovery_path)``.  The original credential file is never
+    truncated before the replacement is fully written and fsynced.
+    """
+    descriptor = None
+    recovery_path = None
+    recovery_complete = False
+    try:
+        credential_file.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, raw_path = tempfile.mkstemp(
+            dir=str(credential_file.parent),
+            prefix=".%s.refresh-recovery-" % credential_file.name,
+        )
+        recovery_path = Path(raw_path)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as temporary:
+            descriptor = None
+            json.dump(credential, temporary, indent=2, ensure_ascii=False)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.chmod(recovery_path, 0o600)
+        recovery_complete = True
+        os.replace(recovery_path, credential_file)
+        recovery_path = None
+        return True, None
+    except (OSError, TypeError, ValueError):
+        if recovery_complete:
+            return False, recovery_path
+        if recovery_path is not None:
+            try:
+                recovery_path.unlink()
+            except OSError:
+                pass
+        fallback = _write_recovery_credential(
+            credential,
+            TOKEN_RECOVERY_DIR,
+            "file-refresh-",
+        )
+        return False, fallback
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
 def is_credential_valid(credential):
@@ -195,19 +279,27 @@ def refresh_access_token(credential=None, credential_file=None):
 
                     # 저장 위치 결정
                     if credential_file:
-                        # 파일에 저장 (저장된 계정)
-                        try:
-                            credential_file.write_text(json.dumps(new_credential, indent=2, ensure_ascii=False))
-                            os.chmod(credential_file, 0o600)
+                        saved, recovery_path = persist_credential_file(
+                            new_credential, credential_file
+                        )
+                        if saved:
                             return new_credential, None
-                        except Exception as e:
-                            return new_credential, f"파일 저장 실패: {e}"
+                        if recovery_path:
+                            return new_credential, "파일 저장 실패; 새 credential 복구 파일: %s" % recovery_path
+                        return new_credential, "파일 저장 실패; 새 credential 복구도 실패"
                     elif from_keychain:
                         # Keychain에 저장 (현재 로그인 계정)
                         if set_keychain_credential(new_credential):
                             return new_credential, None
                         else:
-                            return new_credential, "Keychain 저장 실패"
+                            recovery_path = _write_recovery_credential(
+                                new_credential,
+                                TOKEN_RECOVERY_DIR,
+                                "keychain-refresh-",
+                            )
+                            if recovery_path:
+                                return new_credential, "Keychain 저장 실패; 새 credential 복구 파일: %s" % recovery_path
+                            return new_credential, "Keychain 저장 실패; 새 credential 복구도 실패"
                     else:
                         # credential이 직접 전달됨 - 저장하지 않고 반환만
                         return new_credential, None
@@ -263,6 +355,7 @@ def refresh_access_token(credential=None, credential_file=None):
 
 def check_token_status(credential=None, auto_refresh=True):
     """OAuth 토큰 상태 확인 (자동 갱신 지원)"""
+    from_keychain = credential is None
     if credential is None:
         credential = get_keychain_credential()
     if not credential:
@@ -276,9 +369,11 @@ def check_token_status(credential=None, auto_refresh=True):
 
     # 만료 시간 미리 체크 (API 호출 전)
     if auto_refresh and is_token_expired(credential):
-        new_credential, error = refresh_access_token(credential)
-        if new_credential:
+        new_credential, error = refresh_access_token(None if from_keychain else credential)
+        if new_credential and not error:
             return TokenStatus.REFRESHED, "토큰이 자동으로 갱신되었습니다."
+        if new_credential and error:
+            return TokenStatus.ERROR, f"갱신된 토큰 저장 실패: {error}"
         # 갱신 실패 - 에러 분류
         already_tried_refresh = True
         if classify_refresh_error(error) == RefreshError.PERMANENT:
@@ -301,9 +396,11 @@ def check_token_status(credential=None, auto_refresh=True):
     except urllib.error.HTTPError as e:
         if e.code == 401:
             if auto_refresh and not already_tried_refresh:
-                new_credential, error = refresh_access_token(credential)
-                if new_credential:
+                new_credential, error = refresh_access_token(None if from_keychain else credential)
+                if new_credential and not error:
                     return TokenStatus.REFRESHED, "토큰이 자동으로 갱신되었습니다."
+                if new_credential and error:
+                    return TokenStatus.ERROR, f"갱신된 토큰 저장 실패: {error}"
                 return TokenStatus.EXPIRED, f"토큰 갱신 실패: {error}"
             return TokenStatus.EXPIRED, "토큰이 만료되었습니다. 재로그인이 필요합니다."
         elif e.code == 403:

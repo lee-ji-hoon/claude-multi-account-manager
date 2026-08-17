@@ -42,7 +42,7 @@ Use AskUserQuestion to ask the following:
 Combine the collected info and user description to create an Issue:
 
 ```bash
-gh issue create --repo lee-ji-hoon/claude-multi-account-manager \
+gh issue create --repo lee-ji-hoon/ai-account-switcher \
   --title "[Bug] {symptom summary}" \
   --body "$(cat <<'ISSUE_EOF'
 ## Symptoms

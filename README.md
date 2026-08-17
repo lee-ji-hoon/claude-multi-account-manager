@@ -1,14 +1,65 @@
-# Claude Code Multi-Account Manager
+# Switchboard — AI Account Switcher
 
 [한국어](README.ko.md)
 
-A Claude Code plugin for managing multiple accounts. Switch between accounts without logging out and monitor usage at a glance.
+One place to monitor and switch accounts for AI coding CLIs. The current CLI plugin supports Claude Code and Codex; the native macOS menu-bar prototype reads live usage from Claude, Codex, Grok, and Gemini through Antigravity (`agy`).
 
-## Installation
+## macOS menu-bar app
+
+![Switchboard demo with no personal information](docs/images/switchboard-overview.png)
+
+The app reads Claude/Codex usage APIs, Grok's local `/usage`, and Antigravity's
+read-only `/usage` and `/credits` JSON. It distinguishes `LIVE` from supporting
+`DEMO` rows, shows usage/reset times and provider-reported credits, and recommends
+an account from the remaining quota.
+
+| Provider | Status | App action |
+|---|---|---|
+| Claude | 5-hour/weekly usage, reset, token health | Switch saved account and verify profile, Keychain, and account-ID readback |
+| Codex | 5-hour/weekly usage, reset, reset/extra credits | Switch saved account and verify the `auth.json` account ID |
+| Grok | Weekly usage and reset | Keep existing sessions intact and launch a new session with the selected `GROK_HOME` profile |
+| Antigravity (`agy`) | Gemini model quota and credits | Show CLI re-authentication guidance because no official account-switch command is available |
+
+Grok's web-only usage-reset count and expiry have no stable local API, so the
+app does not guess them. It links to the web Usage page and never applies a reset,
+purchases credits, or enables auto top-up.
+
+### App installation
+
+Extract `Switchboard-macos.zip` from a GitHub Release and place
+`Switchboard.app` in `~/Applications`, or build and install it locally:
+
+```bash
+git clone https://github.com/lee-ji-hoon/ai-account-switcher.git
+cd ai-account-switcher
+prototype/switchboard-menubar/install.sh
+open "$HOME/Applications/Switchboard.app"
+```
+
+LIVE reads and switching require Python 3.8 or later (Homebrew Python or the
+`python3` supplied with Xcode Command Line Tools). Local builds also require
+Xcode Command Line Tools and macOS 14 or later. The release app is ad-hoc signed; if macOS blocks it, Control-click the app in Finder and
+choose **Open**, or use the local-build path above.
+
+For multiple Grok accounts, authenticate each official `GROK_HOME` profile once;
+do not copy credential files:
+
+```bash
+mkdir -p "$HOME/.grok-profiles/personal"
+GROK_HOME="$HOME/.grok-profiles/personal" grok login --oauth
+
+mkdir -p "$HOME/.grok-profiles/work"
+GROK_HOME="$HOME/.grok-profiles/work" grok login --oauth
+```
+
+Switchboard lists only authenticated `~/.grok` and `~/.grok-profiles/*` homes
+and never copies or swaps their `auth.json` files.
+
+## Claude plugin installation
 
 ```bash
 # Register marketplace (once)
-claude plugin marketplace add https://github.com/lee-ji-hoon/claude-multi-account-manager.git
+claude plugin marketplace add https://github.com/lee-ji-hoon/ai-account-switcher.git
 
 # Install plugin
 claude plugin install account@lee-ji-hoon
@@ -145,7 +196,7 @@ cat ~/.claude/accounts/logs/token-refresh.log
 
 ## Contributing
 
-Report bugs or suggest features via [Issues](https://github.com/lee-ji-hoon/claude-multi-account-manager/issues).
+Report bugs or suggest features via [Issues](https://github.com/lee-ji-hoon/ai-account-switcher/issues).
 Run `/account:report` in a Claude Code session to auto-create an Issue with diagnostic info.
 
 ## License

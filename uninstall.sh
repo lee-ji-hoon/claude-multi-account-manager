@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Claude Code Multi-Account Manager - Plugin Uninstaller
+# Switchboard - Claude Code Plugin Uninstaller
 # Claude Code 다중 계정 관리 플러그인 제거 스크립트
 #
 
@@ -15,13 +15,13 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-PLUGIN_NAME="account-manager"
+PLUGIN_NAME="account"
 PLUGIN_DIR="$HOME/.claude/plugins/cache/local/$PLUGIN_NAME"
 ACCOUNTS_DIR="$HOME/.claude/accounts"
 INSTALLED_PLUGINS="$HOME/.claude/plugins/installed_plugins.json"
 
 echo ""
-echo -e "${BOLD}  Claude Code Multi-Account Manager 제거${NC}"
+echo -e "${BOLD}  Switchboard 제거${NC}"
 echo -e "${DIM}  ─────────────────────────────────────${NC}"
 echo ""
 
@@ -51,7 +51,7 @@ fi
 echo -e "  ${CYAN}[2/2]${NC} 플러그인 파일 삭제..."
 
 if [ -d "$PLUGIN_DIR" ]; then
-    rm -rf "$PLUGIN_DIR"
+    command rm -rf "$PLUGIN_DIR"
     echo -e "  ${DIM}  → $PLUGIN_DIR 삭제됨${NC}"
 else
     echo -e "  ${DIM}  → 플러그인 디렉토리 없음${NC}"

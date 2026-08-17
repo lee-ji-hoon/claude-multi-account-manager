@@ -5,6 +5,9 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+from claude_account_manager import version as version_module
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -164,6 +167,112 @@ def assert_markers_in_order(test_case, text, markers):
 
 
 class VersionContractTests(unittest.TestCase):
+    def test_update_checker_ignores_older_github_release(self):
+        response = mock.MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"tag_name":"v2.5.9"}'
+        response.__enter__.return_value = response
+        with tempfile.TemporaryDirectory() as temporary_directory, \
+             mock.patch.object(version_module, "VERSION_CACHE", Path(temporary_directory) / "cache.json"), \
+             mock.patch.object(version_module, "__version__", "2.5.10"), \
+             mock.patch.object(version_module.urllib.request, "urlopen", return_value=response):
+            self.assertIsNone(version_module.check_for_updates())
+
+    def test_update_checker_accepts_newer_release_from_repository(self):
+        response = mock.MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"tag_name":"v3.0.0"}'
+        response.__enter__.return_value = response
+        with tempfile.TemporaryDirectory() as temporary_directory, \
+             mock.patch.object(version_module, "VERSION_CACHE", Path(temporary_directory) / "cache.json"), \
+             mock.patch.object(version_module, "__version__", "2.5.10"), \
+             mock.patch.object(version_module.urllib.request, "urlopen", return_value=response):
+            self.assertEqual("3.0.0", version_module.check_for_updates())
+
+    def test_runtime_package_and_brand_are_not_confused(self):
+        config = (ROOT / "claude_account_manager/config.py").read_text(encoding="utf-8")
+        misc = (ROOT / "claude_account_manager/commands/misc_cmd.py").read_text(encoding="utf-8")
+        version = (ROOT / "claude_account_manager/version.py").read_text(encoding="utf-8")
+        pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('PACKAGE_NAME = "claude-account-manager"', config)
+        self.assertIn('name = "claude-account-manager"', pyproject)
+        self.assertNotIn("Claude Account Manager", misc)
+        self.assertNotIn("pypi.org", version)
+        self.assertIn(
+            "https://api.github.com/repos/lee-ji-hoon/ai-account-switcher/releases/latest",
+            version,
+        )
+        self.assertNotIn("pip install --upgrade", version + misc)
+        self.assertIn("/plugin update account@lee-ji-hoon", version + misc)
+
+    def test_macos_bundle_version_comes_from_plugin_release_version(self):
+        run_script = (ROOT / "prototype/switchboard-menubar/run.sh").read_text(encoding="utf-8")
+        self.assertIn('.claude-plugin/plugin.json', run_script)
+        self.assertIn('CFBundleShortVersionString', run_script)
+        self.assertIn('CFBundleVersion', run_script)
+
+    def test_tag_workflow_enforces_and_publishes_release_notes(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+        self.assertIn('tags:\n      - "v*.*.*"', workflow)
+        self.assertIn(
+            'python3 scripts/release_notes.py "$version" --base-ref "$previous_tag" --output release-notes.md',
+            workflow,
+        )
+        self.assertIn("runs-on: macos-14", workflow)
+        self.assertIn("prototype/switchboard-menubar/run.sh --build-only", workflow)
+        self.assertIn("codesign --verify --deep --strict", workflow)
+        self.assertIn("Switchboard-macos.zip", workflow)
+        self.assertIn("actions/upload-artifact@v4", workflow)
+        self.assertIn("actions/download-artifact@v4", workflow)
+        self.assertIn("needs: build-macos-app", workflow)
+        self.assertGreaterEqual(workflow.count('git fetch origin main'), 2)
+        self.assertGreaterEqual(workflow.count('git rev-list -n 1 "$GITHUB_REF_NAME"'), 2)
+        self.assertGreaterEqual(workflow.count('git rev-parse origin/main'), 2)
+        self.assertIn("release tag must point exactly to origin/main", workflow)
+        self.assertIn("grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$'", workflow)
+        self.assertIn("release version must be greater than", workflow)
+        self.assertIn("current <= highest", workflow)
+        self.assertIn("python3 -m unittest discover -s tests -p 'test_*.py'", workflow)
+        self.assertIn(
+            "python3 -m unittest discover -s prototype/switchboard-menubar/tests -p 'test_*.py'",
+            workflow,
+        )
+        self.assertIn("bash tests/test_hooks_shell.sh", workflow)
+        self.assertIn("bash tests/test_install_shell.sh", workflow)
+        self.assertNotIn("gh release upload", workflow)
+        self.assertLess(
+            workflow.index("python3 -m unittest discover -s tests"),
+            workflow.index("gh release create"),
+        )
+        self.assertLess(
+            workflow.index("Build and verify Switchboard.app"),
+            workflow.index("gh release create"),
+        )
+        self.assertLess(
+            workflow.index("Switchboard-macos.zip", workflow.index("gh release create")),
+            workflow.index("--notes-file release-notes.md"),
+        )
+        self.assertIn('gh release create "${{ github.ref_name }}"', workflow)
+        self.assertIn("--notes-file release-notes.md", workflow)
+
+    def test_release_skill_gates_readme_impact_and_github_release(self):
+        release = read_release_skill()
+
+        assert_markers_in_order(
+            self,
+            release,
+            [
+                "### Documentation",
+                "README 변경 불필요 — <구체적 이유>",
+                'python3 scripts/release_notes.py "{version}"',
+                "python3 -m unittest discover -s tests -p 'test_*.py'",
+                "git push origin v{version}",
+                "gh run watch",
+                'gh release view "v{version}"',
+            ],
+        )
+
     def test_ci_runs_supported_python_matrix_and_full_gate(self):
         workflow_path = ROOT / ".github/workflows/test.yml"
         self.assertTrue(workflow_path.is_file(), "CI workflow must exist")
@@ -251,11 +360,14 @@ class VersionContractTests(unittest.TestCase):
             ".claude-plugin/marketplace.json",
             "pyproject.toml",
             "CHANGELOG.md",
+            "--base-ref",
             "python3 -m unittest discover -s tests -p 'test_*.py'",
+            "python3 -m unittest discover -s prototype/switchboard-menubar/tests -p 'test_*.py'",
             "bash tests/test_hooks_shell.sh",
             "bash tests/test_install_shell.sh",
-            "bash -n install.sh hooks-handlers/session-start.sh hooks-handlers/prompt-submit.sh",
-            "git add .claude-plugin/plugin.json .claude-plugin/marketplace.json pyproject.toml CHANGELOG.md",
+            "prototype/switchboard-menubar/run.sh --build-only",
+            "codesign --verify --deep --strict",
+            "git add .claude-plugin/plugin.json .claude-plugin/marketplace.json pyproject.toml CHANGELOG.md README.md README.ko.md",
             "git commit",
             "git push origin develop",
             "git fetch origin '{}'".format(DEVELOP_REFSPEC),
@@ -650,7 +762,7 @@ class VersionContractTests(unittest.TestCase):
         )
         stage_command = (
             "git add .claude-plugin/plugin.json .claude-plugin/marketplace.json "
-            "pyproject.toml CHANGELOG.md"
+            "pyproject.toml CHANGELOG.md README.md README.ko.md"
         )
         clean_command = (
             'test -z "$(git status --porcelain)" || { echo '

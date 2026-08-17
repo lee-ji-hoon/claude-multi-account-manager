@@ -85,7 +85,7 @@ PY
 SH
 ```
 
-### 3. Update all release metadata and changelog
+### 3. Update all release metadata, changelog, and README impact
 
 Set the exact same `{version}` in each release artifact:
 
@@ -93,6 +93,13 @@ Set the exact same `{version}` in each release artifact:
 2. `.claude-plugin/marketplace.json` (`account` entry)
 3. `pyproject.toml` (`[project].version`)
 4. `CHANGELOG.md` (new dated release entry)
+
+The release entry must contain at least one user-visible change bullet and a
+`### Documentation` section. Its bullet must either name each updated
+`README.md` / `README.ko.md` file, or state
+`README 변경 불필요 — <구체적 이유>`. Inspect the actual diff and update both
+READMEs whenever install steps, commands, supported providers, UI behavior, or
+user-facing configuration changed.
 
 Re-read all three metadata files and stop if any value differs from
 `{version}`.
@@ -103,10 +110,24 @@ Run every command and stop on the first failure:
 
 ```bash
 bash -euo pipefail <<'SH'
+RELEASE_NOTES_FILE="$(mktemp -t switchboard-release-notes.XXXXXX.md)"
+trap 'rm -f "$RELEASE_NOTES_FILE"' EXIT
+PREVIOUS_TAG="$(git tag --sort=-version:refname --list 'v[0-9]*' | head -n 1)"
+test -n "$PREVIOUS_TAG" || { echo "ERROR: previous release tag not found" >&2; exit 1; }
+python3 scripts/release_notes.py "{version}" --base-ref "$PREVIOUS_TAG" --output "$RELEASE_NOTES_FILE"
+test -s "$RELEASE_NOTES_FILE"
 python3 -m unittest discover -s tests -p 'test_*.py'
+python3 -m unittest discover -s prototype/switchboard-menubar/tests -p 'test_*.py'
 bash tests/test_hooks_shell.sh
 bash tests/test_install_shell.sh
-bash -n install.sh hooks-handlers/session-start.sh hooks-handlers/prompt-submit.sh
+bash -n install.sh hooks-handlers/session-start.sh hooks-handlers/prompt-submit.sh prototype/switchboard-menubar/run.sh prototype/switchboard-menubar/install.sh
+APP_PATH="$(prototype/switchboard-menubar/run.sh --build-only | tail -n 1)"
+test -d "$APP_PATH"
+codesign --verify --deep --strict "$APP_PATH"
+APP_ARCHIVE="$(mktemp -t Switchboard-macos.XXXXXX.zip)"
+ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$APP_ARCHIVE"
+test -s "$APP_ARCHIVE"
+command rm -f "$APP_ARCHIVE"
 SH
 ```
 
@@ -115,11 +136,12 @@ Do not commit, push, merge, or tag until the full gate passes.
 ### 5. Publish the tested release through develop, main, and the tag
 
 Between the successful gate and release commit, do not pull, checkout, merge,
-reset, clean, stash, or edit any file. Only stage the four release files:
+reset, clean, stash, or edit any file. Stage the release metadata, changelog,
+and both READMEs when their impact was recorded:
 
 ```bash
 bash -euo pipefail <<'SH'
-git add .claude-plugin/plugin.json .claude-plugin/marketplace.json pyproject.toml CHANGELOG.md
+git add .claude-plugin/plugin.json .claude-plugin/marketplace.json pyproject.toml CHANGELOG.md README.md README.ko.md
 git commit -m "release: v{version}"
 RELEASE_SHA="$(git rev-parse HEAD)"
 git push origin develop
@@ -149,12 +171,24 @@ git push origin v{version}
 REMOTE_TAG_SHA="$(git ls-remote --tags origin "refs/tags/v{version}^{}" | awk 'NR == 1 {print $1}')"
 test "$REMOTE_TAG_SHA" = "$MAIN_SHA" || { echo "ERROR: remote tag does not point to the verified main commit" >&2; exit 1; }
 git merge-base --is-ancestor "$RELEASE_SHA" "$REMOTE_TAG_SHA"
+
+# The tag workflow validates the same release contract and publishes GitHub notes.
+WORKFLOW_RUN_ID=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    WORKFLOW_RUN_ID="$(gh run list --repo lee-ji-hoon/ai-account-switcher --workflow release.yml --commit "$MAIN_SHA" --event push --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+    test -n "$WORKFLOW_RUN_ID" && break
+    sleep 2
+done
+test -n "$WORKFLOW_RUN_ID" || { echo "ERROR: release workflow run was not created" >&2; exit 1; }
+gh run watch "$WORKFLOW_RUN_ID" --repo lee-ji-hoon/ai-account-switcher --exit-status --compact
+test "$(gh release view "v{version}" --repo lee-ji-hoon/ai-account-switcher --json tagName --jq .tagName)" = "v{version}"
 SH
 ```
 
 This publication block is one indivisible fail-fast execution unit. Do not split
 it: `RELEASE_SHA` records the gated release commit, each remote ref is checked
-after its push, and any failure stops all later merge, push, or tag mutations.
+after its push, and the tag workflow must publish the generated GitHub Release
+before cache verification begins.
 
 ### 6. Verify the marketplace checkout and exact cache version
 
@@ -198,9 +232,11 @@ Claude Code must be restarted before using the released plugin.
 - [ ] Latest develop is fetched by explicit refspec, merged with `--ff-only`, exactly equal to `origin/develop`, and clean
 - [ ] Requested semver is greater than every remote and cached version
 - [ ] All three metadata files equal `{version}` and CHANGELOG is updated
+- [ ] Release notes render successfully and Documentation records the README impact
 - [ ] Python, both shell suites, and shell syntax gates pass
 - [ ] The gated tree's `RELEASE_SHA` exactly equals the pushed `origin/develop`
 - [ ] Local main equals `origin/main` before merging the exact `RELEASE_SHA`
 - [ ] Verified main and tag commits contain the exact `RELEASE_SHA`
 - [ ] main and `v{version}` are SHA-verified and pushed in that order
+- [ ] Tag workflow succeeds and the exact GitHub Release exists
 - [ ] Marketplace checkout and exact `{version}` cache are verified
