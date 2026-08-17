@@ -46,7 +46,9 @@ Xcode Command Line Tools and macOS 14 or later. The release app is ad-hoc signed
 choose **Open**, or use the local-build path above.
 
 Before publication, both the local release gate and GitHub Actions run the full
-Python suite on the supported minimum, Python 3.8, then verify the app bundle and signature.
+Python suite on the supported minimum, Python 3.8. GitHub then builds with the
+`macos-14` runner's Swift 5.10 and verifies the app bundle and signature before
+publishing the release ZIP.
 
 For multiple Grok accounts, authenticate each official `GROK_HOME` profile once;
 do not copy credential files:
