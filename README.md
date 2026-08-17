@@ -13,6 +13,10 @@ read-only `/usage` and `/credits` JSON. It distinguishes `LIVE` from supporting
 `DEMO` rows, shows usage/reset times and provider-reported credits, and recommends
 an account from the remaining quota.
 
+The provider-focused view is the default. Use `Overview` in the left sidebar to
+compare all four providers, or select Claude, Codex, Grok, or Gemini to inspect
+account details and available switching actions.
+
 | Provider | Status | App action |
 |---|---|---|
 | Claude | 5-hour/weekly usage, reset, token health | Switch saved account and verify profile, Keychain, and account-ID readback |
@@ -40,6 +44,9 @@ LIVE reads and switching require Python 3.8 or later (Homebrew Python or the
 `python3` supplied with Xcode Command Line Tools). Local builds also require
 Xcode Command Line Tools and macOS 14 or later. The release app is ad-hoc signed; if macOS blocks it, Control-click the app in Finder and
 choose **Open**, or use the local-build path above.
+
+Before publication, both the local release gate and GitHub Actions run the full
+Python suite on the supported minimum, Python 3.8, then verify the app bundle and signature.
 
 For multiple Grok accounts, authenticate each official `GROK_HOME` profile once;
 do not copy credential files:

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.1] - 2026-08-17
+
+### Changed
+- **메뉴바 UI 단일화** — 배포 앱에서 프로토타입용 A/B/C 비교 컨트롤을 제거하고 공급자 집중 화면을 기본으로 사용한다. 왼쪽 `전체` 항목에서 Claude·Codex·Grok·Gemini 상태를 한 번에 확인한 뒤 공급자별 상세 화면으로 이동할 수 있다.
+
+### Fixed
+- **Python 3.8 릴리스 호환성** — Codex 사용량 테스트의 context 구문을 Python 3.8 호환 `ExitStack`으로 바꾸고, 로컬 릴리스 게이트도 지원 최소 버전의 전체 테스트를 강제해 CI와 동일한 실패를 태그 전에 차단한다.
+
+### Documentation
+- `README.md`, `README.ko.md`, `prototype/switchboard-menubar/README.md`에 단일 사이드바 UI와 Python 3.8 릴리스 검증을 기록하고, 개인정보 없는 최신 `전체` 화면 캡처를 반영했다.
+
 ## [3.0.0] - 2026-08-17
 
 ### Added
