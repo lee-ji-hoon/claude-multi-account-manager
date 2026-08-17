@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.0] - 2026-08-17
+
+### Added
+- **Switchboard macOS 메뉴바 앱** — Claude, Codex, Grok, Antigravity(`agy`)의 LIVE 사용량·초기화 시각·크레딧을 한 화면에서 비교하고 남은 한도로 계정을 추천한다. 개인정보 없는 데모 화면, 무광 앱 아이콘, 로컬 설치기와 `Switchboard-macos.zip` 릴리스 산출물을 포함한다.
+- **검증 가능한 공급자 전환** — Claude와 Codex는 저장 credential의 실소유자와 전환 후 readback을 확인하고, Grok은 계정별 `GROK_HOME`으로 기존 세션을 건드리지 않는 새 Terminal 세션을 연다.
+
+### Changed
+- **AGY를 Gemini 단일 진실 소스로 사용** — 레거시 Gemini CLI 계정 파일을 버리고 `agy --print /usage`와 `/credits`의 읽기 전용 결과만 표시한다. AGY에 공식 계정 전환 명령이 없어 가짜 즉시 전환은 제공하지 않는다.
+- **Switchboard 브랜드와 릴리스 계약 통일** — 프로젝트·문서·앱 표면을 Switchboard로 정리하고, 태그가 현재 `main`과 일치하며 기존 버전보다 높고 전체 테스트와 앱 서명을 통과한 경우에만 GitHub Release를 생성한다.
+
+### Fixed
+- **회전형 OAuth credential 보존 강화** — Claude/Codex 전환과 토큰 갱신을 원자 저장·소유권 검증·compare-and-swap rollback으로 보호해 동시 refresh/login의 최신 one-time refresh token을 덮어쓰지 않는다.
+- **앱 설치 복구** — 새 앱 복사나 서명이 실패하면 불완전한 번들을 제거하고 기존 설치가 있으면 자동 복구한다.
+
+### Documentation
+- `README.md`와 `README.ko.md`에 Switchboard 설치법, 공급자별 LIVE/전환 범위, 개인정보 없는 앱 캡처, Grok 프로필과 AGY 제한을 추가했다.
+
 ## [2.5.10] - 2026-07-19
 
 ### Changed

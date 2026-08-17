@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claude-account-manager"
-version = "2.5.10"
+version = "3.0.0"
 description = "Switchboard multi-account manager for AI coding CLIs"
 readme = "README.md"
 license = {text = "MIT"}
