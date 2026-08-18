@@ -366,6 +366,42 @@ def cmd_list():
                         except Exception:
                             pass
 
+    # ── Grok (x.ai) ────────────────────────────────────────────────
+    # 사용량 %·재설정 시각은 API가 없어(실측: /v1/usage 등 404) 가져오지 못한다.
+    # 대신 최소 요청 1회로 "지금 쓸 수 있나"를 판정한다 — 403 spending-limit은
+    # 인증 실패가 아니라 한도 소진이라, 구분해야 재로그인 삽질을 막는다.
+    from ..grok_provider import (
+        is_grok_available, load_grok_accounts, get_grok_token_status,
+        probe_grok_entitlement, STATUS_LABELS, GROK_USAGE_URL,
+    )
+
+    if is_grok_available():
+        grok_accounts = load_grok_accounts()
+        if grok_accounts:
+            print()
+            print(f"  {c(Colors.DIM, 'Grok')}")
+            for acc in grok_accounts:
+                label = acc.get("name") or acc.get("email") or "(unknown)"
+                print(f"    {c(Colors.CYAN, label)} {c(Colors.DIM, acc.get('email', ''))}")
+
+                state, detail = probe_grok_entitlement(acc.get("access_token", ""))
+                text = STATUS_LABELS.get(state, state)
+                if state == "ok":
+                    print(f"      {c(Colors.GREEN, '● ' + text)}")
+                elif state == "quota_exhausted":
+                    print(f"      {c(Colors.RED, '● ' + text)} - {c(Colors.YELLOW, GROK_USAGE_URL)}")
+                    print(f"      {c(Colors.DIM, '재설정 시각·일회성 리셋 티켓은 위 페이지에서만 확인된다')}")
+                elif state == "unauthorized":
+                    print(f"      {c(Colors.RED, '● ' + text)} - {c(Colors.YELLOW, 'grok 재로그인 필요')}")
+                else:
+                    print(f"      {c(Colors.DIM, '● ' + text)} {c(Colors.DIM, detail[:60])}")
+
+                ts = get_grok_token_status(acc)
+                if ts == "expired":
+                    print(f"      {c(Colors.DIM, '토큰')} {c(Colors.DIM, '만료 — grok CLI 실행 시 자동 갱신')}")
+                elif ts == "expiring":
+                    print(f"      {c(Colors.DIM, '토큰')} {c(Colors.YELLOW, '1시간 내 만료')}")
+
     print(c(Colors.DIM, "  " + "─" * 55))
 
     if not current_email:
