@@ -81,8 +81,13 @@ CODEX_INDEX_FILE = CODEX_ACCOUNTS_DIR / "index.json"
 
 
 def is_codex_available() -> bool:
-    """multi-login-codex 계정 인덱스가 존재하는지 확인"""
-    return CODEX_INDEX_FILE.exists()
+    """Codex 연동 가능 여부 — 저장된 계정 인덱스 또는 현재 CLI 로그인이 있으면 True.
+
+    인덱스만 보면 새 머신에서 첫 계정을 등록할 수 없다(인덱스는 등록해야
+    생기는데 등록 메뉴가 인덱스 존재에 가려짐). auth.json(Codex CLI 로그인)도
+    가용 신호로 취급해 첫 등록 경로를 연다.
+    """
+    return CODEX_INDEX_FILE.exists() or CODEX_AUTH_FILE.exists()
 
 
 def load_codex_index() -> dict:
